@@ -281,8 +281,27 @@ function connectFb(cfg) {
     S.fbOk = true;
     setStatus('Connected', true);
 
-
-    // Auth Listener — fires on page load for returning users
+    // ⚡ Handle Mobile Redirect Login
+    S.auth.getRedirectResult().then(async result => {
+      if (result && result.user) {
+        S.user = result.user;
+        const freshRole = await getRoleByUid(result.user.uid);
+        if (freshRole) {
+          S.role = freshRole;
+          localStorage.setItem('ba_cached_role', S.role);
+          handleAuthSuccess(result.user);
+        } else {
+          showRoleScreen();
+        }
+      }
+    }).catch(e => {
+      if (e.code === 'auth/unauthorized-domain') {
+        const d = window.location.hostname;
+        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Please add it to Firebase Console > Auth > Settings > Authorized Domains.`;
+      } else {
+        q('#auth-err').textContent = '❌ ' + e.message;
+      }
+    });
     S.auth.onAuthStateChanged(async user => {
       // Skip if handleAuthSubmit already handled this (avoids double-trigger)
       if (S.user && S.role) return;
@@ -1984,50 +2003,48 @@ async function handleAuthSubmit() {
 }
 
 async function loginWithGoogle() {
-  if (!S.auth || !S.db) { q('#auth-err').textContent = '\u23f3 Firebase not ready.'; return; }
+  if (!S.auth || !S.db) { q('#auth-err').textContent = '⏳ Firebase not ready.'; return; }
   const err = q('#auth-err');
-  err.textContent = '\ud83c\udf10 Opening Google sign-in...';
+  err.textContent = '🌐 Opening Google sign-in...';
+  
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    const res = await S.auth.signInWithPopup(provider);
-    const user = res.user;
-    S.user = user;
-
-    // Check if this Google user already has a role saved
-    const cachedRole = localStorage.getItem('ba_cached_role');
-    if (cachedRole) {
-      S.role = cachedRole;
+    
+    // Check if mobile (Redirect is more reliable on mobile)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      await S.auth.signInWithRedirect(provider);
     } else {
-      const foundRole = await getRoleByUid(user.uid);
-      if (foundRole) {
-        S.role = foundRole;
+      const res = await S.auth.signInWithPopup(provider);
+      const user = res.user;
+      S.user = user;
+
+      const cachedRole = localStorage.getItem('ba_cached_role');
+      if (cachedRole) {
+        S.role = cachedRole;
       } else {
-        // Brand-new Google user — save their chosen role
-        const exists = await checkEmailExists(user.email);
-        if (exists) {
-          err.textContent = '❌ Email is already registered.';
-          return;
+        const foundRole = await getRoleByUid(user.uid);
+        if (foundRole) {
+          S.role = foundRole;
+        } else {
+          const role = S.selectedRole || 'student';
+          const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
+          if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+          else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+          else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+          S.role = role;
         }
-
-        const role = S.selectedRole || 'student';
-        const docData = {
-          name: user.displayName || user.email,
-          email: user.email,
-          role,
-          createdAt: Date.now()
-        };
-        if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-        else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-        else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-
-        S.role = role;
       }
+      localStorage.setItem('ba_cached_role', S.role);
+      handleAuthSuccess(user);
     }
-    localStorage.setItem('ba_cached_role', S.role);
-    handleAuthSuccess(user);
   } catch (e) {
-    if (e.code !== 'auth/popup-closed-by-user') {
-      err.textContent = '\u274c ' + e.message;
+    if (e.code === 'auth/unauthorized-domain') {
+      const domain = window.location.hostname;
+      err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      err.textContent = '❌ ' + e.message;
     } else {
       err.textContent = '';
     }
