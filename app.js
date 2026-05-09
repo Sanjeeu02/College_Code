@@ -269,6 +269,10 @@ function connectFb(cfg) {
     S.db = window.firebase.database();
     S.auth = window.firebase.auth();
 
+    // ⚡ Force LOCAL Persistence (Stay logged in forever)
+    S.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .catch(e => console.error("Persistence Error:", e));
+
     // Initialize the default (Student) DB
     S.studentDb = window.firebase.firestore(); 
 

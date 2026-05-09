@@ -3,7 +3,7 @@
    Enables: App install + Offline support + iOS notifications
    ============================================= */
 
-const CACHE = 'busAlert-v22';
+const CACHE = 'busAlert-v24';
 const FILES = [
     '/',
     '/index.html',
