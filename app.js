@@ -281,26 +281,21 @@ function connectFb(cfg) {
     S.fbOk = true;
     setStatus('Connected', true);
 
-    // ⚡ Handle Mobile Redirect Login
+    S.fbOk = true;
+    setStatus('Connected', true);
+
+    // ⚡ Hardened Mobile Redirect Handler
+    S.isProcessingRedirect = true;
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
-        showToast('👋 Finalizing your login...');
+        showToast('👋 Google sign-in detected. Resuming...');
         const user = result.user;
         S.user = user;
         
         let role = await getRoleByUid(user.uid);
-        
         if (!role) {
-          // New user coming back from Google redirect — check for pending role
-          role = localStorage.getItem('ba_pending_role') || S.selectedRole || 'student';
-          
-          const docData = { 
-            name: user.displayName || user.email, 
-            email: user.email, 
-            role, 
-            createdAt: Date.now() 
-          };
-
+          role = localStorage.getItem('ba_pending_role') || 'student';
+          const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
           if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
           else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
           else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
@@ -308,32 +303,36 @@ function connectFb(cfg) {
         
         S.role = role;
         localStorage.setItem('ba_cached_role', S.role);
-        localStorage.removeItem('ba_pending_role'); // Clean up
+        localStorage.removeItem('ba_pending_role');
+        S.isProcessingRedirect = false; // Release lock
         handleAuthSuccess(user);
+      } else {
+        S.isProcessingRedirect = false; // No redirect result, release lock
       }
     }).catch(e => {
+      S.isProcessingRedirect = false;
       if (e.code === 'auth/unauthorized-domain') {
         const d = window.location.hostname;
-        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Please add it to Firebase Console > Auth > Settings > Authorized Domains.`;
+        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Add to Firebase Console > Auth > Authorized Domains.`;
       } else {
         q('#auth-err').textContent = '❌ ' + e.message;
       }
     });
+
     S.auth.onAuthStateChanged(async user => {
-      // Skip if handleAuthSubmit already handled this (avoids double-trigger)
+      // ⚡ AUTH LOCK: If we are currently processing a Google Redirect, 
+      // let THAT handler finish. Don't interfere here.
+      if (S.isProcessingRedirect) return;
+
       if (S.user && S.role) return;
       if (user) {
         S.user = user;
-
-        // ⚡ FAST PATH: use cached role to show UI instantly
         const cachedRole = localStorage.getItem('ba_cached_role');
         if (cachedRole) {
           S.role = cachedRole;
           handleAuthSuccess(user);
-          // Silently verify the cached role in the background
           getRoleByUid(user.uid).then(freshRole => {
             if (freshRole && freshRole !== cachedRole) {
-              // Role changed externally — reload cleanly
               localStorage.setItem('ba_cached_role', freshRole);
               location.reload();
             } else if (!freshRole) {
@@ -343,7 +342,6 @@ function connectFb(cfg) {
           return;
         }
 
-        // SLOW PATH (first login): fetch role from DB
         S.role = await getRoleByUid(user.uid);
         if (S.role) {
           localStorage.setItem('ba_cached_role', S.role);
