@@ -284,11 +284,16 @@ function connectFb(cfg) {
     S.fbOk = true;
     setStatus('Connected', true);
 
-    // ⚡ Hardened Mobile Redirect Handler
-    S.isProcessingRedirect = true;
+    S.fbOk = true;
+    setStatus('Connected', true);
+
+    // ⚡ Unified Auth Handler (Handles both normal load and redirects)
+    let redirectHandled = false;
+
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
-        showToast('👋 Google sign-in detected. Resuming...');
+        redirectHandled = true;
+        showToast('👋 Sign-in confirmed. Loading your data...');
         const user = result.user;
         S.user = user;
         
@@ -304,55 +309,45 @@ function connectFb(cfg) {
         S.role = role;
         localStorage.setItem('ba_cached_role', S.role);
         localStorage.removeItem('ba_pending_role');
-        S.isProcessingRedirect = false; // Release lock
         handleAuthSuccess(user);
-      } else {
-        S.isProcessingRedirect = false; // No redirect result, release lock
       }
     }).catch(e => {
-      S.isProcessingRedirect = false;
       if (e.code === 'auth/unauthorized-domain') {
         const d = window.location.hostname;
-        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Add to Firebase Console > Auth > Authorized Domains.`;
+        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Add to Firebase Console.`;
       } else {
-        q('#auth-err').textContent = '❌ ' + e.message;
+        showToast('⚠️ Auth Error: ' + e.message);
       }
     });
 
     S.auth.onAuthStateChanged(async user => {
-      // ⚡ AUTH LOCK: If we are currently processing a Google Redirect, 
-      // let THAT handler finish. Don't interfere here.
-      if (S.isProcessingRedirect) return;
+      // Small delay to let redirect handler take precedence
+      setTimeout(async () => {
+        if (redirectHandled) return; // Let redirect handler finish
+        
+        if (S.user && S.role) return; // Already handled
+        
+        if (user) {
+          S.user = user;
+          const cachedRole = localStorage.getItem('ba_cached_role');
+          if (cachedRole) {
+            S.role = cachedRole;
+            handleAuthSuccess(user);
+            return;
+          }
 
-      if (S.user && S.role) return;
-      if (user) {
-        S.user = user;
-        const cachedRole = localStorage.getItem('ba_cached_role');
-        if (cachedRole) {
-          S.role = cachedRole;
-          handleAuthSuccess(user);
-          getRoleByUid(user.uid).then(freshRole => {
-            if (freshRole && freshRole !== cachedRole) {
-              localStorage.setItem('ba_cached_role', freshRole);
-              location.reload();
-            } else if (!freshRole) {
-              localStorage.removeItem('ba_cached_role');
-            }
-          });
-          return;
-        }
-
-        S.role = await getRoleByUid(user.uid);
-        if (S.role) {
-          localStorage.setItem('ba_cached_role', S.role);
-          handleAuthSuccess(user);
+          S.role = await getRoleByUid(user.uid);
+          if (S.role) {
+            localStorage.setItem('ba_cached_role', S.role);
+            handleAuthSuccess(user);
+          } else {
+            showRoleScreen();
+          }
         } else {
+          localStorage.removeItem('ba_cached_role');
           showRoleScreen();
         }
-      } else {
-        localStorage.removeItem('ba_cached_role');
-        showRoleScreen();
-      }
+      }, 500);
     });
 
     startBusListener();
