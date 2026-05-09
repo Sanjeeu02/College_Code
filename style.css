@@ -2212,12 +2212,15 @@ body {
   z-index: 10000;
   background: #f8fafc;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto; /* Allow scrolling for small screens */
+  display: flex;
+  flex-direction: column;
 }
 
 .auth-v4-container {
   display: flex;
   width: 100%;
-  height: 100%;
+  min-height: 100vh; /* Allow it to grow beyond viewport */
   background: #fff;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2690,18 +2693,42 @@ body {
     -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 32px;
-    padding: 40px 30px;
+    padding: 30px 24px; /* More compact for mobile */
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     text-align: center;
+    margin: 40px auto; /* Add margin to avoid sticking to top/bottom */
   }
   
+  .auth-v4-header {
+    margin-bottom: 24px;
+  }
+
   .auth-v4-logo {
-    margin: 0 auto 24px;
+    margin: 0 auto 16px;
+    width: 42px;
+    height: 42px;
+    font-size: 1.4rem;
   }
   
   .auth-v4-box h1 {
     color: white;
-    font-size: 1.8rem;
+    font-size: 1.6rem;
+  }
+
+  .fields-v4 {
+    gap: 14px; /* Tighter spacing between fields */
+  }
+
+  .field-group-v4 {
+    gap: 6px;
+  }
+
+  .separator-v4 {
+    margin: 20px 0;
+  }
+
+  .options-v4 {
+    margin: 16px 0 24px;
   }
   
   .field-group-v4 label {
