@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>BusAlert Admin — Fleet Monitor</title>
+    <meta name="robots" content="noindex" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="style.css?v=6" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+            --primary: #4f46e5;
+            --primary-bg: rgba(79, 70, 229, 0.1);
+            --primary-d: #4338ca;
+            --green: #10b981;
+            --red: #ef4444;
+            --orange: #f59e0b;
+            --text: #ffffff;
+            --sub: rgba(255, 255, 255, 0.7);
+            --muted: rgba(255, 255, 255, 0.4);
+            --muted2: rgba(255, 255, 255, 0.5);
+            --font: 'Inter', system-ui, sans-serif;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        /* ── Login Screen ── */
+        #login-screen {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at 0% 0%, #1e1b4b 0%, #0f172a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .login-box {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 32px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: modalPop 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            text-align: center;
+        }
+
+        @keyframes modalPop {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .login-logo {
+            font-size: 3.5rem;
+            margin-bottom: 12px;
+        }
+
+        .login-title {
+            font-size: 2rem;
+            font-weight: 900;
+            margin-bottom: 8px;
+            letter-spacing: -1px;
+            color: white;
+        }
+
+        .login-sub {
+            font-size: 0.95rem;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 32px;
+        }
+
+        .login-field-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .login-field {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: white;
+            font-family: var(--font);
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .login-field:focus {
+            background: white;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px var(--primary-bg);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 14px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-d));
+            color: white;
+            font-family: var(--font);
+            font-size: 1.1rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.35);
+        }
+
+        .login-err {
+            color: var(--red);
+            font-size: .85rem;
+            font-weight: 600;
+            margin-top: 16px;
+            min-height: 20px;
+        }
+
+        /* ── Admin Shell ── */
+        #admin-shell {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .admin-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            flex-shrink: 0;
+            z-index: 1000;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+        }
+
+        .admin-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .admin-brand-icon {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-d));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            font-size: 1.5rem;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+            color: white;
+        }
+
+        .admin-brand-name {
+            font-size: 1.3rem;
+            font-weight: 900;
+            color: var(--primary);
+            letter-spacing: -0.5px;
+        }
+
+        .admin-brand-badge {
+            background: var(--primary);
+            color: white;
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 50px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .admin-nav {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .admin-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--sub);
+            text-decoration: none;
+            border-radius: 12px;
+            background: transparent;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
+        }
+
+        .admin-nav-item:hover {
+            background: var(--primary-bg);
+            color: var(--primary);
+            transform: translateY(-1px);
+        }
+
+        .admin-nav-item.nav-logout {
+            color: var(--red);
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .admin-nav-item.nav-logout:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .admin-nav-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--sub);
+            background: #f1f5f9;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        #live-count {
+            color: var(--green);
+            font-weight: 900;
+        }
+
+        .login-back-link {
+            display: block;
+            text-align: center;
+            margin-top: 16px;
+            font-size: .82rem;
+            color: var(--sub);
+            text-decoration: none;
+            transition: color .2s;
+        }
+
+        .login-back-link:hover {
+            color: var(--primary);
+        }
+
+        .login-switch-link {
+            display: block;
+            text-align: center;
+            margin-top: 12px;
+            font-size: .82rem;
+            color: var(--primary);
+            text-decoration: none;
+            cursor: pointer;
+            transition: color .2s;
+        }
+
+        .login-switch-link:hover {
+            text-decoration: underline;
+        }
+
+        #login-btn-register,
+        #adm-user-wrap,
+        #adm-pass-confirm-wrap {
+            display: none;
+        }
+
+           .info-panel {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            width: 340px;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+            transform: translateY(20px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 1001;
+            color: white;
+        }
+
+        .info-panel.show {
+            transform: translateY(0);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .ip-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .ip-title h2 {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: var(--text);
+            margin-bottom: 2px;
+        }
+
+        .ip-status-badge {
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 50px;
+            text-transform: uppercase;
+        }
+
+        .ip-status-badge.live {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .ip-status-badge.offline {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .ip-body {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .ip-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .ip-item-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--muted2);
+        }
+
+        .ip-item-val {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .ip-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .bus-row-v4 {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 18px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bus-row-v4:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+        }
+
+        .bus-row-v4.selected {
+            border-color: var(--primary);
+            background: rgba(79, 70, 229, 0.15);
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.2);
+        }
+
+        .br-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .br-num {
+            font-size: 1rem;
+            font-weight: 800;
+            color: var(--text);
+        }
+
+        .br-status {
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 50px;
+            text-transform: uppercase;
+        }
+
+        .br-status.live {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .br-status.offline {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .br-route {
+            font-size: 0.85rem;
+            color: var(--muted2);
+            margin-bottom: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .br-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .br-time {
+            font-size: 0.75rem;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .br-code-tag {
+            font-family: monospace;
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .alert-row-card {
+            background: rgba(239, 68, 68, 0.1);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--red);
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .alert-row-name {
+            font-weight: 800;
+            color: var(--red);
+            font-size: 0.95rem;
+        }
+
+        .alert-row-time {
+            font-size: 0.75rem;
+            color: var(--muted2);
+        }
+
+        .google-btn {
+            width: 100%;
+            padding: 12px;
+            background: white;
+            border: 1px solid #dadce0;
+            border-radius: 10px;
+            color: #3c4043;
+            font-family: var(--font);
+            font-size: .93rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: background .2s;
+            margin-top: 16px;
+        }
+
+        .google-btn:hover {
+            background: #f8f9fa;
+        }
+
+        .google-btn img {
+            width: 18px;
+            height: 18px;
+        }
+
+        .auth-separator {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .auth-separator::before,
+        .auth-separator::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+
+
+        /* ── Body Layout ── */
+        .admin-body {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .sidebar.collapsed {
+            width: 0;
+            border-right: none;
+        }
+
+        .sidebar-header {
+            padding: 20px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: .8rem;
+            font-weight: 800;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .refresh-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--sub);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: .72rem;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all .2s;
+        }
+
+        .refresh-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        #bus-sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .bus-row {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 14px;
+            cursor: pointer;
+            transition: all .2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bus-row::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--green);
+            border-radius: 3px 0 0 3px;
+        }
+
+        .bus-row.stale::before {
+            background: var(--orange);
+        }
+
+        .bus-row.offline::before {
+            background: var(--muted);
+        }
+
+        .bus-row:hover {
+            border-color: var(--primary);
+        }
+
+        .bus-row.selected {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, .1);
+        }
+
+        .br-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .br-num {
+            font-size: .92rem;
+            font-weight: 800;
+        }
+
+        .br-status {
+            font-size: .68rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+        }
+
+        .br-status.live {
+            background: rgba(34, 197, 94, .15);
+            color: var(--green);
+        }
+
+        .br-status.stale {
+            background: rgba(245, 158, 11, .15);
+            color: var(--orange);
+        }
+
+        .br-status.offline {
+            background: rgba(71, 85, 105, .15);
+            color: var(--muted);
+        }
+
+        .br-route {
+            font-size: .75rem;
+            color: var(--sub);
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .br-meta {
+            display: flex;
+            gap: 10px;
+            font-size: .7rem;
+            color: var(--muted);
+        }
+
+        .br-code {
+            font-size: .7rem;
+            color: var(--primary);
+            font-weight: 700;
+            font-family: monospace;
+            margin-top: 4px;
+        }
+
+        .no-buses-hint {
+            text-align: center;
+            padding: 40px 16px;
+            color: var(--muted);
+            font-size: .85rem;
+        }
+
+        /* ── Map ── */
+        .map-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .sidebar-toggle-btn {
+            position: absolute;
+            top: 12px;
+            left: 0;
+            z-index: 1000;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: none;
+            /* Sits flush against the sidebar border */
+            color: var(--sub);
+            width: 24px;
+            height: 48px;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: var(--bg);
+            color: var(--primary);
+        }
+
+        #admin-map {
+            flex: 1;
+        }
+
+        /* ── Info Panel ── */
+        .info-panel {
+            position: absolute;
+            top: 80px;
+            right: 16px;
+            z-index: 500;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            width: 240px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
+            display: none;
+        }
+
+        .info-panel.show {
+            display: block;
+        }
+
+        .ip-close {
+            float: right;
+            background: none;
+            border: none;
+            color: var(--sub);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .ip-busnum {
+            font-size: 1.1rem;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+
+        .ip-route {
+            font-size: .8rem;
+            color: var(--sub);
+            margin-bottom: 12px;
+        }
+
+        .ip-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .ip-stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: .8rem;
+        }
+
+        .ip-stat-label {
+            color: var(--sub);
+        }
+
+        .ip-stat-val {
+            font-weight: 600;
+        }
+
+        .ip-code-box {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .ip-code-label {
+            font-size: .68rem;
+            color: var(--sub);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .ip-code-val {
+            font-size: 1.6rem;
+            font-weight: 800;
+            font-family: monospace;
+            color: var(--primary);
+            letter-spacing: 3px;
+        }
+
+        .ip-focus-btn {
+            margin-top: 10px;
+            width: 100%;
+            padding: 9px;
+            border: none;
+            border-radius: 8px;
+            background: var(--primary);
+            color: white;
+            font-family: var(--font);
+            font-size: .82rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        /* Alert rows */
+        .alert-row-card {
+            background: rgba(239, 68, 68, .1);
+            border: 1px solid rgba(239, 68, 68, .3);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+
+        .alert-row-top {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .alert-row-name {
+            font-size: .85rem;
+            font-weight: 700;
+            color: var(--red);
+        }
+
+        .alert-row-time {
+            font-size: .72rem;
+            color: var(--muted);
+        }
+
+        .alert-row-loc {
+            font-size: .75rem;
+            color: var(--sub);
+        }
+
+        .alert-section {
+            border-top: 1px solid var(--border);
+            margin-top: 10px;
+            padding: 10px 16px 10px;
+            flex-shrink: 0;
+        }
+
+        .alert-section-title {
+            font-size: .72rem;
+            font-weight: 700;
+            color: var(--red);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 8px;
+        }
+
+        #alert-list {
+            max-height: 160px;
+            overflow-y: auto;
+        }
+
+        .no-alert {
+            font-size: .78rem;
+            color: var(--muted);
+            text-align: center;
+            padding: 12px 0;
+        }
+
+        /* ── Create Bus Section ── */
+        .create-bus-section {
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            flex-shrink: 0;
+        }
+
+        .create-bus-title {
+            font-size: .72rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 10px;
+        }
+
+        .create-bus-form {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .create-bus-form .admin-input {
+            width: 100%;
+            padding: 9px 12px;
+            background: var(--bg);
+            border: 1.5px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: .82rem;
+            outline: none;
+            transition: border-color .2s;
+        }
+
+        .create-bus-form .admin-input:focus {
+            border-color: var(--primary);
+        }
+
+        .create-bus-form .admin-input::placeholder {
+            color: var(--muted);
+        }
+
+        .create-bus-btn {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            background: var(--primary);
+            color: white;
+            font-family: var(--font);
+            font-size: .82rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .create-bus-btn:hover {
+            background: #4f46e5;
+            transform: translateY(-1px);
+        }
+
+        .code-result-box {
+            background: linear-gradient(135deg, #1e1b4b, #312e81);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            margin-top: 6px;
+        }
+
+        .code-result-label {
+            font-size: .68rem;
+            color: rgba(255, 255, 255, .6);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .code-result-val {
+            font-size: 2rem;
+            font-weight: 900;
+            font-family: monospace;
+            color: white;
+            letter-spacing: 6px;
+        }
+
+        .code-result-hint {
+            font-size: .68rem;
+            color: rgba(255, 255, 255, .5);
+            margin-top: 4px;
+        }
+
+        /* ── Bus Profile Cards (registered buses) ── */
+        .profile-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .profile-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--primary);
+            border-radius: 3px 0 0 3px;
+        }
+
+        .pc-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .pc-num {
+            font-size: .88rem;
+            font-weight: 800;
+        }
+
+        .pc-code {
+            font-size: .72rem;
+            font-weight: 700;
+            font-family: monospace;
+            color: var(--primary);
+            background: rgba(99, 102, 241, .15);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .pc-route {
+            font-size: .72rem;
+            color: var(--sub);
+            margin-bottom: 4px;
+        }
+
+        .pc-stops {
+            font-size: .68rem;
+            color: var(--muted);
+        }
+
+        .pc-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .pc-del-btn {
+            background: none;
+            border: 1px solid rgba(239, 68, 68, .3);
+            color: var(--red);
+            font-family: var(--font);
+            font-size: .7rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .pc-del-btn:hover {
+            background: rgba(239, 68, 68, .1);
+        }
+
+        /* Sidebar tabs */
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-tab {
+            flex: 1;
+            padding: 10px 8px;
+            text-align: center;
+            font-size: .72rem;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all .2s;
+            font-family: var(--font);
+        }
+
+        .sidebar-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .sidebar-tab:hover {
+            color: var(--text);
+        }
+
+        .admin-field-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+
+        .admin-field-group label {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: var(--muted2);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .admin-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-family: var(--font);
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+
+        .admin-input:focus {
+            background: white;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px var(--primary-bg);
+            outline: none;
+        }
+
+        .create-bus-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-d));
+            color: white;
+            border: none;
+            border-radius: 14px;
+            font-weight: 800;
+            font-family: var(--font);
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+        }
+
+        .create-bus-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.3);
+        }
+
+        .sidebar-panel {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            flex-direction: column;
+        }
+
+        .sidebar-panel.active {
+            display: flex;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NO LOCAL LOGIN (Auth handled by index.html) -->
+    <!-- ADMIN SHELL -->
+    <div id="admin-shell" style="display:none">
+
+        <header class="admin-header">
+            <div class="admin-brand">
+                <span class="admin-brand-icon">🚌</span>
+                <span class="admin-brand-name">BusAlert</span>
+                <span class="admin-brand-badge">ADMIN</span>
+            </div>
+            <nav class="admin-nav">
+                <!-- (App Home link removed) -->
+                <div class="admin-nav-stat">Live Pilots: <span id="live-count">0</span></div>
+                <div class="admin-nav-stat">Total Fleet: <span id="total-count" style="color:var(--text)">0</span></div>
+                <div style="flex-grow: 1;"></div>
+                <button class="admin-nav-item nav-logout" onclick="doLogout()">⬅ Logout</button>
+            </nav>
+        </header>
+
+        <div class="admin-body" style="position:relative">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Sidebar Tabs -->
+                <div class="sidebar-tabs">
+                    <button class="sidebar-tab active" id="stab-live" onclick="switchSidebarTab('live')">🟢
+                        Live</button>
+                    <button class="sidebar-tab" id="stab-history" onclick="switchSidebarTab('history')">📜
+                        History</button>
+                    <button class="sidebar-tab" id="stab-manage" onclick="switchSidebarTab('manage')">⚙️ Manage</button>
+                </div>
+
+                <!-- Tab 1: Live Buses (only truly active, < 5 min) -->
+                <div class="sidebar-panel active" id="spanel-live">
+                    <div class="sidebar-header">
+                        Live Now
+                        <button class="refresh-btn" onclick="refreshBuses()">↻ Refresh</button>
+                    </div>
+                    <div id="bus-sidebar-list">
+                        <div class="no-buses-hint">🔄 Connecting to Firebase...</div>
+                    </div>
+                    <!-- Student Alerts Section -->
+                    <div class="alert-section">
+                        <div class="alert-section-title">⚠️ Student Missed-Stop Alerts</div>
+                        <div id="alert-list">
+                            <div class="no-alert">No active alerts</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: History (stale/past buses) -->
+                <div class="sidebar-panel" id="spanel-history">
+                    <div class="sidebar-header">
+                        Past Sessions
+                        <button class="refresh-btn" onclick="clearAllHistory()">🗑 Clear All</button>
+                    </div>
+                    <div id="history-sidebar-list">
+                        <div class="no-buses-hint">No past sessions</div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Manage Bus Profiles -->
+                <div class="sidebar-panel" id="spanel-manage">
+                    <!-- Create New Bus -->
+                    <div class="create-bus-section">
+                        <div class="create-bus-title">➕ Register New Bus</div>
+                        <div class="create-bus-form">
+                            <div class="admin-field-group">
+                                <label>Bus Number</label>
+                                <input class="admin-input" type="text" id="adm-bus-num"
+                                    placeholder="e.g. TN 23 AB 1234" />
+                            </div>
+                            <div class="admin-field-group">
+                                <label>Route Description</label>
+                                <input class="admin-input" type="text" id="adm-bus-route"
+                                    placeholder="e.g. Ambur → Vellore → College" />
+                            </div>
+                            <div class="admin-field-group">
+                                <label>Stops (Comma Separated)</label>
+                                <input class="admin-input" type="text" id="adm-bus-stops"
+                                    placeholder="Stop 1, Stop 2..." />
+                            </div>
+                            <button class="create-bus-btn" onclick="createBusProfile()">🚌 Create Bus & Generate
+                                Code</button>
+                        </div>
+                        <div id="code-result" style="display:none"></div>
+                    </div>
+
+                    <!-- Registered Profiles -->
+                    <div style="padding: 12px 16px;">
+                        <div class="create-bus-title" style="color:var(--sub)">📋 Registered Buses</div>
+                        <div id="profile-list" style="display:flex;flex-direction:column;gap:8px">
+                            <div class="no-alert">No buses registered yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Area -->
+            <div class="map-section">
+                <!-- Sidebar Toggle Button -->
+                <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar">
+                    <span id="sb-toggle-icon">◀</span>
+                </button>
+                <div id="admin-map"></div>
+            </div>
+
+            <!-- Info Panel -->
+            <div class="info-panel" id="info-panel">
+                <button class="ip-close" onclick="closeInfoPanel()">✕</button>
+                <div class="ip-header">
+                    <div class="ip-title">
+                        <h2 id="ip-busnum">Bus --</h2>
+                        <div id="ip-route" style="font-size:0.85rem; color:var(--muted2)">--</div>
+                    </div>
+                    <div id="ip-status" class="ip-status-badge">--</div>
+                </div>
+                
+                <div class="ip-body">
+                    <div class="ip-item">
+                        <span class="ip-item-label">LAST UPDATE</span>
+                        <span class="ip-item-val" id="ip-updated">--</span>
+                    </div>
+                    <div class="ip-item">
+                        <span class="ip-item-label">ACCURACY</span>
+                        <span class="ip-item-val" id="ip-accuracy">--</span>
+                    </div>
+                    <div class="ip-item">
+                        <span class="ip-item-label">COORDINATES</span>
+                        <span class="ip-item-val" id="ip-coords" style="font-family:monospace">--</span>
+                    </div>
+                    
+                    <div style="margin-top:12px; padding:16px; background:#f8fafc; border-radius:16px; border:1px solid #e2e8f0;">
+                        <div style="font-size:0.7rem; font-weight:800; color:var(--muted2); margin-bottom:4px; text-transform:uppercase;">Student Access Code</div>
+                        <div id="ip-code" style="font-size:1.4rem; font-weight:900; color:var(--primary); font-family:monospace; letter-spacing:2px;">----</div>
+                    </div>
+                </div>
+
+                <button class="create-bus-btn" onclick="focusSelected()" style="margin-top:20px; width:100%;">📍 Focus on Map</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        // ── FIREBASE CONFIG (smartbustracker-ef456) ──
+        const FIREBASE_CFG = {
+            apiKey: "AIzaSyCQv4dhN6GtLeoOO5WEYpaFOTZFwy_wXMY",
+            authDomain: "smartbustracker-ef456.firebaseapp.com",
+            databaseURL: "https://smartbustracker-ef456-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "smartbustracker-ef456",
+            storageBucket: "smartbustracker-ef456.firebasestorage.app",
+            messagingSenderId: "686712758756",
+            appId: "1:686712758756:web:b671be77184b0f4bf9a7f1"
+        };
+
+        // ── DETERMINISTIC CODE GENERATOR (same as app.js) ──
+        function generateAccessCode(busNum) {
+            const today = new Date();
+            const dayStr = `${today.getFullYear()}${today.getMonth()}${today.getDate()}`;
+            const seed = busNum.replace(/\s+/g, '') + dayStr;
+            let hash = 0;
+            for (let i = 0; i < seed.length; i++) {
+                hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+                hash |= 0;
+            }
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            let h = Math.abs(hash);
+            for (let i = 0; i < 4; i++) {
+                code += chars[h % chars.length];
+                h = Math.floor(h / chars.length);
+            }
+            return code;
+        }
+
+        let db = null, auth = null, map = null, markers = {}, allBuses = {}, allProfiles = {}, selectedId = null, alertMarkers = {};
+        let studentDb = null, driverDb = null, adminDb = null;
+        let currentUser = null;
+        let isRegisterMode = false;
+
+
+        function handleAuthSuccess(user) {
+            currentUser = user.uid;
+            localStorage.setItem('ba_admin_uid', user.uid);
+            document.getElementById('admin-shell').style.display = 'flex';
+            initAdmin();
+        }
+
+        function doLogout() {
+            auth.signOut().then(() => {
+                localStorage.removeItem('ba_admin_uid');
+                localStorage.removeItem('ba_cached_role');
+                window.location.href = 'index.html';
+            });
+        }
+
+        // Check if already logged in
+        window.addEventListener('DOMContentLoaded', () => {
+            loadFirebase(() => {
+                if (!window.firebase.apps?.length) window.firebase.initializeApp(FIREBASE_CFG);
+                db = window.firebase.database();
+                auth = window.firebase.auth();
+
+                // Initialize the default (Student) DB
+                studentDb = window.firebase.firestore(); 
+
+                // Initialize the Driver DB
+                driverDb = window.firebase.app().firestore("driver-db");
+
+                // Initialize the Admin DB
+                adminDb = window.firebase.app().firestore("admin-db");
+
+                auth.onAuthStateChanged(user => {
+                    if (user) {
+                        handleAuthSuccess(user);
+                    } else {
+                        // Not logged in -> redirect to main unified auth portal
+                        window.location.href = 'index.html';
+                    }
+                });
+            });
+        });
+
+        function initAdmin() {
+            initMap();
+            // Load user-specific profiles and active buses
+            listenBuses();
+            listenAlerts();
+            listenProfiles();
+        }
+
+        function loadFirebase(cb) {
+            if (window.firebase) { cb(); return; }
+            const srcs = [
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js',
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js',
+                'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js',
+            ];
+            let n = 0;
+            srcs.forEach(src => {
+                const t = document.createElement('script');
+                t.src = src;
+                t.onload = () => { if (++n === srcs.length) cb(); };
+                document.head.appendChild(t);
+            });
+        }
+
+        function initMap() {
+            map = L.map('admin-map', { zoomControl: false, attributionControl: false }).setView([12.9716, 77.5946], 11);
+            L.control.zoom({ position: 'topright' }).addTo(map);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+        }
+
+        // ── SIDEBAR TOGGLE ──
+        function toggleSidebar() {
+            const sb = document.querySelector('.sidebar');
+            const icon = document.getElementById('sb-toggle-icon');
+
+            sb.classList.toggle('collapsed');
+            if (sb.classList.contains('collapsed')) {
+                icon.textContent = '▶';
+            } else {
+                icon.textContent = '◀';
+            }
+
+            // Let the CSS transition finish then tell the map to resize
+            setTimeout(() => {
+                if (map) map.invalidateSize();
+            }, 300);
+        }
+
+        // ── SIDEBAR TABS ──
+        function switchSidebarTab(tab) {
+            ['live', 'history', 'manage'].forEach(t => {
+                document.getElementById('stab-' + t).classList.toggle('active', t === tab);
+                document.getElementById('spanel-' + t).classList.toggle('active', t === tab);
+            });
+        }
+
+        // ── BUS PROFILES (Admin creates these) ──
+        function listenProfiles() {
+            db.ref('bus_profiles').on('value', snap => {
+                const raw = snap.val() || {};
+                allProfiles = {};
+                Object.entries(raw).forEach(([id, p]) => {
+                    if (p.createdBy === currentUser || (currentUser === 'admin' && (!p.createdBy || p.createdBy === 'admin'))) {
+                        allProfiles[id] = p;
+                    }
+                });
+                renderProfiles();
+                updateCounts();
+            });
+        }
+
+        function createBusProfile() {
+            const num = document.getElementById('adm-bus-num').value.trim();
+            const route = document.getElementById('adm-bus-route').value.trim();
+            const stopsRaw = document.getElementById('adm-bus-stops').value.trim();
+            const stops = stopsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+            if (!num || !route) { alert('⚠️ Enter bus number and route!'); return; }
+            if (!db) { alert('⏳ Firebase not connected yet.'); return; }
+
+            const code = generateAccessCode(num);
+            const profileId = 'profile_' + num.replace(/\s+/g, '_').toUpperCase();
+
+            const profileData = {
+                busNumber: num,
+                route: route,
+                stops: stops,
+                accessCode: code,
+                createdAt: Date.now(),
+                createdBy: currentUser
+            };
+
+            db.ref(`bus_profiles/${profileId}`).set(profileData).then(() => {
+                // Show generated code
+                const resultEl = document.getElementById('code-result');
+                resultEl.style.display = 'block';
+                resultEl.innerHTML = `
+                    <div class="code-result-box">
+                        <div class="code-result-label">Driver & Student Code</div>
+                        <div class="code-result-val">${code}</div>
+                        <div class="code-result-hint">Share this code with the driver.<br>Same code for both driver login and student tracking.</div>
+                    </div>`;
+
+                // Clear form
+                document.getElementById('adm-bus-num').value = '';
+                document.getElementById('adm-bus-route').value = '';
+                document.getElementById('adm-bus-stops').value = '';
+
+                // Auto-hide after 10s
+                setTimeout(() => { resultEl.style.display = 'none'; }, 10000);
+            }).catch(e => alert('❌ Error: ' + e.message));
+        }
+
+        function renderProfiles() {
+            const list = document.getElementById('profile-list');
+            const entries = Object.entries(allProfiles);
+            if (!entries.length) {
+                list.innerHTML = '<div class="no-alert">No buses registered yet.<br>Create one above.</div>';
+                return;
+            }
+            list.innerHTML = entries.map(([id, p]) => `
+                <div class="profile-card">
+                    <div class="pc-top">
+                        <span class="pc-num">🚌 ${esc(p.busNumber || '--')}</span>
+                        <span class="pc-code">${p.accessCode || '----'}</span>
+                    </div>
+                    <div class="pc-route">📍 ${esc(p.route || '--')}</div>
+                    <div class="pc-stops">🚏 ${(p.stops || []).join(', ') || 'No stops'}</div>
+                    <div class="pc-actions">
+                        <button class="pc-del-btn" onclick="deleteProfile('${id}')">🗑 Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function deleteProfile(id) {
+            if (!confirm('Delete this bus profile? The driver will no longer be able to use its code.')) return;
+            db.ref(`bus_profiles/${id}`).remove();
+        }
+
+        // ── LIVE BUSES ──
+        let liveBuses = {};    // GPS < 5 min ago
+        let historyBuses = {}; // GPS > 5 min ago (stale)
+
+        const LIVE_THRESHOLD = 5 * 60 * 1000;   // 5 minutes
+        const DELETE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
+
+        function listenBuses() {
+            db.ref('buses').on('value', snap => {
+                const rawBuses = snap.val() || {};
+                allBuses = {};
+                liveBuses = {};
+                historyBuses = {};
+
+                Object.entries(rawBuses).forEach(([id, b]) => {
+                    // Filter: only show buses managed by this admin
+                    const isAdminUser = b.createdBy === currentUser || (currentUser === 'admin' && (!b.createdBy || b.createdBy === 'admin'));
+                    if (!isAdminUser) return;
+
+                    // Skip and delete inactive entries
+                    if (!b.active) {
+                        db.ref(`buses/${id}`).remove();
+                        if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+                        return;
+                    }
+
+                    const now = Date.now();
+                    const age = b.location?.timestamp ? (now - b.location.timestamp) : (b.startedAt ? (now - b.startedAt) : Infinity);
+
+                    // Auto-delete entries older than 24 hours
+                    if (age > DELETE_THRESHOLD) {
+                        db.ref(`buses/${id}`).remove();
+                        if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+                        return;
+                    }
+
+                    allBuses[id] = b;
+                    liveBuses[id] = b;
+                });
+
+                renderSidebar();
+                renderHistory();
+                updateMapMarkers();
+                updateCounts();
+            });
+        }
+
+        function listenAlerts() {
+            db.ref('student_alerts').on('value', snap => {
+                const alerts = snap.val() || {};
+                // Filter alerts: only show for buses managed by this admin
+                const myAlerts = {};
+                Object.entries(alerts).forEach(([id, a]) => {
+                    if (a.adminUser === currentUser) myAlerts[id] = a;
+                });
+                renderAlerts(myAlerts);
+            });
+        }
+
+        // Live sidebar — only buses with GPS data < 5 minutes old
+        function renderSidebar() {
+            const list = document.getElementById('bus-sidebar-list');
+            const entries = Object.entries(liveBuses);
+            if (!entries.length) {
+                list.innerHTML = '<div class="no-buses-hint">No live buses right now.<br>When a driver goes live, they\'ll appear here.</div>';
+                return;
+            }
+            entries.sort((a, b) => (b[1].location?.timestamp || 0) - (a[1].location?.timestamp || 0));
+            list.innerHTML = entries.map(([id, b]) => {
+                const code = b.accessCode || '----';
+                return `
+                <div class="bus-row-v4 ${selectedId === id ? 'selected' : ''}" onclick="selectBus('${id}')">
+                    <div class="br-top">
+                        <span class="br-num">🚌 Bus ${esc(b.busNumber || '--')}</span>
+                        <span class="br-status live">LIVE</span>
+                    </div>
+                    <div class="br-route">📍 ${esc(b.route || '--')}</div>
+                    <div class="br-footer">
+                        <span class="br-time">⏱ ${timeAgo(b.location?.timestamp)}</span>
+                        <span class="br-code-tag">${code}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('history-sidebar-list');
+            const entries = Object.entries(historyBuses);
+            if (!entries.length) {
+                list.innerHTML = '<div class="no-buses-hint">No past sessions.<br>Old tracking sessions appear here.</div>';
+                return;
+            }
+            entries.sort((a, b) => (b[1].location?.timestamp || 0) - (a[1].location?.timestamp || 0));
+            list.innerHTML = entries.map(([id, b]) => {
+                return `
+                <div class="bus-row-v4 offline" onclick="selectBus('${id}')">
+                    <div class="br-top">
+                        <span class="br-num">🚍 Bus ${esc(b.busNumber || '--')}</span>
+                        <span class="br-status offline">ENDED</span>
+                    </div>
+                    <div class="br-route">📍 ${esc(b.route || '--')}</div>
+                    <div class="br-footer">
+                        <span class="br-time">⏱ Last seen: ${timeAgo(b.location?.timestamp)}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function clearAllHistory() {
+            if (!confirm('Delete all past bus tracking sessions?')) return;
+            Object.keys(historyBuses).forEach(id => {
+                db.ref(`buses/${id}`).remove();
+                if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+            });
+        }
+
+        function selectBus(id) {
+            selectedId = id;
+            renderSidebar();
+            showInfoPanel(id);
+            if (markers[id]) {
+                map.flyTo(markers[id].getLatLng(), 16, { animate: true, duration: 1.5 });
+            } else if (allBuses[id] && allBuses[id].location) {
+                const loc = allBuses[id].location;
+                map.flyTo([loc.lat, loc.lon], 16, { animate: true, duration: 1.5 });
+            }
+        }
+
+        function showInfoPanel(id) {
+            const b = allBuses[id];
+            if (!b) return;
+            const isLive = b.active;
+            document.getElementById('ip-busnum').textContent = 'Bus ' + (b.busNumber || '--');
+            document.getElementById('ip-route').textContent = b.route || '--';
+            
+            const statusEl = document.getElementById('ip-status');
+            statusEl.textContent = isLive ? 'LIVE' : 'OFFLINE';
+            statusEl.className = 'ip-status-badge ' + (isLive ? 'live' : 'offline');
+
+            document.getElementById('ip-updated').textContent = timeAgo(b.location?.timestamp);
+            document.getElementById('ip-accuracy').textContent = b.location ? `±${Math.round(b.location.accuracy || 0)}m` : '--';
+            document.getElementById('ip-coords').textContent = b.location ? `${b.location.lat.toFixed(4)}, ${b.location.lon.toFixed(4)}` : '--';
+            document.getElementById('ip-code').textContent = b.accessCode || '----';
+            document.getElementById('info-panel').classList.add('show');
+        }
+
+        function closeInfoPanel() { document.getElementById('info-panel').classList.remove('show'); selectedId = null; renderSidebar(); }
+
+        function focusSelected() {
+            if (selectedId) {
+                if (markers[selectedId]) {
+                    map.flyTo(markers[selectedId].getLatLng(), 16, { animate: true, duration: 1.5 });
+                } else if (allBuses[selectedId] && allBuses[selectedId].location) {
+                    const loc = allBuses[selectedId].location;
+                    map.flyTo([loc.lat, loc.lon], 16, { animate: true, duration: 1.5 });
+                }
+            }
+        }
+
+        function updateMapMarkers() {
+            // Remove markers for buses that no longer exist or are now history
+            Object.keys(markers).forEach(id => {
+                if (!allBuses[id] || !liveBuses[id]) {
+                    map.removeLayer(markers[id]);
+                    delete markers[id];
+                }
+            });
+            // Add/update markers for active live buses
+            Object.entries(liveBuses).forEach(([id, b]) => {
+                if (!b.location || !b.active) return;
+                const { lat, lon } = b.location;
+                const color = '#22c55e';
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div style="background:${color};border:3px solid white;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;box-shadow:0 4px 14px rgba(0,0,0,.4)">🚌</div>`,
+                    iconSize: [36, 36], iconAnchor: [18, 18]
+                });
+                if (!markers[id]) {
+                    markers[id] = L.marker([lat, lon], { icon }).addTo(map);
+                    markers[id].bindPopup(`<b>Bus ${b.busNumber}</b><br>${b.route || ''}<br><small>Code: ${b.accessCode || '--'}</small>`);
+                    markers[id].on('click', () => selectBus(id));
+                } else {
+                    markers[id].setLatLng([lat, lon]);
+                    markers[id].setIcon(icon);
+                }
+            });
+        }
+
+        function renderAlerts(alerts) {
+            const list = document.getElementById('alert-list');
+            const entries = Object.entries(alerts).filter(([, a]) => a.active);
+            if (!entries.length) { list.innerHTML = '<div class="no-alert">No active alerts</div>'; return; }
+            list.innerHTML = entries.map(([id, a]) => `
+    <div class="alert-row-card">
+      <div class="alert-row-top">
+        <span class="alert-row-name">🆘 ${esc(a.studentName || 'Unknown')}</span>
+        <span class="alert-row-time">${timeAgo(a.timestamp)}</span>
+      </div>
+      <div class="alert-row-loc">📍 ${a.lat?.toFixed(4) || '?'}, ${a.lon?.toFixed(4) || '?'} — Bus ${esc(a.busNum || '?')}</div>
+    </div>
+  `).join('');
+            // Plot alert markers on map
+            entries.forEach(([id, a]) => {
+                if (!a.lat || !a.lon) return;
+                if (!alertMarkers[id]) {
+                    alertMarkers[id] = L.marker([a.lat, a.lon], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div style="background:#ef4444;border:3px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:.9rem;box-shadow:0 4px 14px rgba(239,68,68,.5)">🆘</div>',
+                            iconSize: [30, 30], iconAnchor: [15, 15]
+                        })
+                    }).addTo(map);
+                    alertMarkers[id].bindPopup(`<b>🆘 Missed Stop Alert</b><br>${a.studentName || '?'}<br>Bus: ${a.busNum || '?'}`);
+                }
+            });
+        }
+
+        function updateCounts() {
+            // Live = currently active buses sending GPS now
+            const live = Object.values(allBuses).filter(b => b.active && b.location && (Date.now() - b.location.timestamp) < 5 * 60 * 1000).length;
+            // Total = registered bus profiles (unique buses, not repeated sessions)
+            const totalProfiles = Object.keys(allProfiles).length;
+            document.getElementById('live-count').textContent = live;
+            document.getElementById('total-count').textContent = totalProfiles;
+        }
+
+        function refreshBuses() { if (db) db.ref('buses').once('value', snap => { allBuses = snap.val() || {}; renderSidebar(); updateMapMarkers(); updateCounts(); }); }
+
+        function timeAgo(ts) {
+            if (!ts) return 'never';
+            const s = Math.floor((Date.now() - ts) / 1000);
+            if (s < 10) return 'just now';
+            if (s < 60) return s + 's ago';
+            if (s < 3600) return Math.floor(s / 60) + 'm ago';
+            return Math.floor(s / 3600) + 'h ago';
+        }
+        function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    </script>
+</body>
+
+
+</html>

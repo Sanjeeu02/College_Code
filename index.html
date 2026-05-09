@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-title" content="BusAlert" />
+    <title>BusAlert — Live Bus Tracker</title>
+    <meta name="description"
+        content="Track your college bus live on a map. Sleep mode alerts you when near your stop." />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="manifest.json" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+
+    <!-- Leaflet Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet Routing Machine for OSRM Route Polylines -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <link rel="stylesheet" href="style.css?v=6" />
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <!-- AI Engine (loaded before app.js) -->
+    <script src="ai-engine.js?v=2"></script>
+</head>
+
+<body>
+
+    <!-- ── ROLE SELECTION ── -->
+    <div id="role-screen" class="role-screen hidden">
+        <div class="bg-blobs">
+            <div class="blob blob-1"></div>
+            <div class="blob blob-2"></div>
+            <div class="blob blob-3"></div>
+        </div>
+        <div class="role-box">
+            <h1 class="role-title">Welcome to BusAlert</h1>
+            <p class="role-sub">Please select your role to continue</p>
+            <div class="role-options">
+                <button class="role-btn" onclick="selectRole('student')">
+                    <div class="role-icon">🎓</div>
+                    <div class="role-info">
+                        <h4>Student</h4>
+                        <p>Track your bus and set stop alerts</p>
+                    </div>
+                </button>
+                <button class="role-btn" onclick="selectRole('driver')">
+                    <div class="role-icon">🚍</div>
+                    <div class="role-info">
+                        <h4>Driver</h4>
+                        <p>Go live and share bus location</p>
+                    </div>
+                </button>
+                <button class="role-btn" onclick="selectRole('admin')">
+                    <div class="role-icon">🔐</div>
+                    <div class="role-info">
+                        <h4>Admin</h4>
+                        <p>Manage fleet and bus profiles</p>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── AUTH SCREEN (Reverted to Split Layout) ── -->
+    <div id="auth-screen" class="auth-screen hidden">
+        <div class="auth-v4-container">
+            <!-- Form Side -->
+            <div class="auth-v4-left">
+                <div class="auth-v4-box">
+                    <button class="back-btn-v4" onclick="backToRoles()">←</button>
+                    
+                    <div class="auth-v4-header">
+                        <div class="auth-v4-logo">🚌</div>
+                        <h1 id="auth-title">Login</h1>
+                    </div>
+
+                    <button class="google-btn-v4" onclick="loginWithGoogle()">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+                        Sign in with Google
+                    </button>
+
+                    <div class="separator-v4">Or sign in with email</div>
+
+                    <div class="fields-v4">
+                        <div id="reg-fields" class="hidden">
+                            <div class="field-group-v4">
+                                <label>Full Name</label>
+                                <input type="text" id="auth-user" placeholder="Enter your name" />
+                            </div>
+                        </div>
+                        <div class="field-group-v4">
+                            <label>Email</label>
+                            <input type="email" id="auth-email" placeholder="email@example.com" />
+                        </div>
+                        <div class="field-group-v4">
+                            <label>Password</label>
+                            <input type="password" id="auth-pass" placeholder="••••••••" />
+                        </div>
+                        <div id="confirm-pass-wrap" class="hidden">
+                            <div class="field-group-v4">
+                                <label>Confirm Password</label>
+                                <input type="password" id="auth-pass-confirm" placeholder="••••••••" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="submit-btn-v4" id="auth-submit-btn" onclick="handleAuthSubmit()">Login</button>
+                    
+                    <div class="auth-err" id="auth-err"></div>
+
+                    <div class="footer-v4">
+                        <p>Don't have an account? <span id="auth-switch" onclick="toggleAuthMode()">Sign up</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visual Side -->
+            <div class="auth-v4-right">
+                <div class="visual-v4-content">
+                    <h1>Real-time Tracking <br>for a Smarter Campus</h1>
+                    <div class="visual-v4-shapes">
+                        <div class="shape-v4 v-circle-1"></div>
+                        <div class="shape-v4 v-pill-1"></div>
+                        <div class="shape-v4 v-capsule-1"></div>
+                        <div class="shape-v4 v-circle-2"></div>
+                        <div class="shape-v4 v-triangle-1"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── PROFILE MODAL ── -->
+    <div id="profile-modal" class="profile-panel hidden">
+        <div class="profile-content">
+            <button class="close-profile-btn" onclick="closeProfile()">✕</button>
+            <div class="profile-header">
+                <div class="profile-avatar" id="p-avatar">👤</div>
+                <div class="profile-info">
+                    <h3 id="p-name">Loading...</h3>
+                    <p id="p-email">--</p>
+                    <span class="profile-role-tag" id="p-role">User</span>
+                </div>
+            </div>
+            <div class="profile-menu">
+                <div class="profile-menu-item" onclick="switchRole()">
+                    <span>🔄</span> Switch Role
+                </div>
+                <div class="profile-menu-item logout-item" onclick="handleLogout()">
+                    <span>⬅️</span> Logout
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ── SPLASH ── -->
+    <div id="splash" class="splash">
+        <div class="splash-inner">
+            <div class="splash-logo">🚌</div>
+            <h1 class="splash-title">BusAlert</h1>
+            <p class="splash-sub">Premium Fleet Monitoring</p>
+            <div class="splash-loader">
+                <div class="splash-progress"></div>
+            </div>
+            <div class="splash-loading-text">Loading...</div>
+        </div>
+    </div>
+
+    <!-- ── APP ── -->
+    <div id="app" class="app hidden">
+
+        <!-- HEADER -->
+        <header class="topbar">
+            <div class="topbar-brand">
+                <span class="brand-icon">🚌</span>
+                <span class="brand-name">BusAlert</span>
+            </div>
+            <div class="topbar-right">
+                <div class="topbar-status">
+                    <span class="status-pip" id="status-pip"></span>
+                    <span class="status-label" id="status-label">Idle</span>
+                </div>
+                <button class="theme-toggle-btn" id="theme-toggle" onclick="toggleTheme()"
+                    title="Toggle Dark Mode">🌙</button>
+                <button class="profile-btn" onclick="openProfile()" title="User Profile">👤</button>
+            </div>
+        </header>
+
+        <!-- TABS -->
+        <nav class="tabs">
+            <button class="tab active" id="tab-sleep" onclick="switchTab('sleep')">
+                <span class="tab-ico">😴</span><span class="tab-txt">Sleep</span>
+            </button>
+            <button class="tab" id="tab-find" onclick="switchTab('find')">
+                <span class="tab-ico">🗺️</span><span class="tab-txt">Track Bus</span>
+            </button>
+            <button class="tab" id="tab-driver" onclick="switchTab('driver')">
+                <span class="tab-ico">🚍</span><span class="tab-txt">Driver</span>
+            </button>
+        </nav>
+
+        <!-- ─────────────── SLEEP MODE ─────────────── -->
+        <section id="panel-sleep" class="panel active">
+            <div class="section-hero sleep-hero">
+                <div class="hero-emoji">😴</div>
+                <div class="hero-text">
+                    <h2>Sleep Mode</h2>
+                    <p>We'll alert you with SOS alarm when near home.</p>
+                </div>
+            </div>
+
+            <div class="block">
+                <div class="block-label">Home / Stop Location</div>
+                <button class="pill-btn" id="btn-set-home" onclick="setHomeFromGPS()">
+                    <span class="pill-ico">📍</span> Set My Home Location
+                </button>
+                <div class="coord-tag hidden" id="home-coord-tag">
+                    <span class="coord-check">✅</span>
+                    <span id="home-coord-text"></span>
+                    <!-- Edit button -->
+                    <button class="edit-loc-btn" id="btn-edit-home" onclick="editHomeLocation()"
+                        title="Change location">✏️ Edit</button>
+                </div>
+            </div>
+
+            <div class="block">
+                <div class="block-label">Alert when I'm within</div>
+                <div class="slider-wrap">
+                    <input type="range" id="sleep-radius" min="0.3" max="3" step="0.1" value="1"
+                        oninput="updateRadius('sleep')" />
+                    <span class="slider-val" id="sleep-radius-val">1.0 km</span>
+                </div>
+            </div>
+
+            <div class="block">
+                <div class="block-label">Alert Type</div>
+                <div class="toggle-list">
+                    <div class="toggle-item">
+                        <span>Vibration</span>
+                        <label class="tog"><input type="checkbox" id="sleep-vibe" checked /><span
+                                class="tog-slider"></span></label>
+                    </div>
+                    <div class="toggle-item">
+                        <span>Sound</span>
+                        <label class="tog"><input type="checkbox" id="sleep-sound" checked /><span
+                                class="tog-slider"></span></label>
+                    </div>
+                    <div class="toggle-item">
+                        <span>Keep Screen On</span>
+                        <label class="tog"><input type="checkbox" id="sleep-screen" /><span
+                                class="tog-slider"></span></label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Distance meter (visible when active) -->
+            <div class="dist-meter hidden" id="sleep-meter">
+                <div class="meter-val" id="sleep-dist-val">--</div>
+                <div class="meter-unit">km from home</div>
+                <div class="meter-bar-bg">
+                    <div class="meter-bar" id="sleep-dist-bar"></div>
+                </div>
+                <div class="meter-hint" id="sleep-dist-hint">Tracking GPS...</div>
+            </div>
+
+            <!-- Start/Stop button -->
+            <button class="main-btn sleep-btn" id="btn-sleep" onclick="toggleSleepMode()">
+                <span id="sleep-btn-label">😴 &nbsp;Start Sleep Mode</span>
+            </button>
+
+            <!-- SOS Alert overlay — requires manual stop -->
+            <div class="sos-overlay hidden" id="sleep-sos">
+                <div class="sos-pulse-ring"></div>
+                <div class="sos-pulse-ring delay1"></div>
+                <div class="sos-content">
+                    <div class="sos-icon">🔔</div>
+                    <div class="sos-title">WAKE UP!</div>
+                    <div class="sos-sub">You're near your stop — GET OFF NOW!</div>
+                    <button class="sos-stop-btn" onclick="stopSosAlarm('sleep')">
+                        ✋ I'm Awake — Stop Alarm
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─────────────── TRACK BUS ─────────────── -->
+        <section id="panel-find" class="panel hidden">
+
+            <!-- Search View -->
+            <div id="code-entry-view">
+                <div class="section-hero track-hero">
+                    <div class="hero-emoji">🗺️</div>
+                    <div class="hero-text">
+                        <h2>Find My Bus</h2>
+                        <p>Search by your stop name to see live buses.</p>
+                    </div>
+                </div>
+
+                <div class="search-row">
+                    <div class="search-box">
+                        <span class="search-icon-el">🔍</span>
+                        <input type="text" id="route-search" class="search-input"
+                            placeholder="Type stop: Ambur, Chennai..." oninput="onSearch()" autocomplete="off" />
+                        <button class="search-x" id="search-x" onclick="clearSearch()">✕</button>
+                    </div>
+                </div>
+
+                <div id="bus-list-wrap">
+                    <div class="empty-hint" id="bus-empty">
+                        <div class="empty-ico">🚏</div>
+                        <p>Search your stop name to see live buses</p>
+                    </div>
+                    <div id="bus-list" class="bus-list hidden"></div>
+                </div>
+            </div>
+
+            <!-- MAP TRACKING VIEW — shown when tracking a bus -->
+            <div id="map-view" class="hidden">
+
+                <!-- Full-screen map -->
+                <div id="live-map" class="live-map"></div>
+
+                <!-- Bottom sheet over map -->
+                <div class="map-sheet">
+                    <div class="sheet-handle"></div>
+
+                    <!-- Bus info bar -->
+                    <div class="bus-info-bar" id="map-bus-bar">
+                        <div class="bus-info-left">
+                            <div class="live-dot-badge">
+                                <div class="live-dot-anim"></div> LIVE
+                            </div>
+                            <div class="bus-info-num" id="map-bus-num">Bus --</div>
+                            <div class="bus-info-route" id="map-bus-route">--</div>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+                            <div style="display:flex;gap:6px;align-items:center">
+                                <button class="refresh-map-btn" id="btn-refresh-map" onclick="refreshTracking()"
+                                    title="Refresh bus location">
+                                    🔄
+                                </button>
+                                <button class="stop-track-btn" onclick="stopTracking()">✕ Stop</button>
+                            </div>
+                            <!-- Miss-Stop Alert button -->
+                            <button class="miss-stop-btn" id="btn-miss-stop" onclick="openMissStopModal()">
+                                🆘 Driver Missed Me!
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Distance + stop setup -->
+                    <div class="sheet-body">
+                        <!-- Predictive Smart Card -->
+                        <div id="leave-now-card" class="leave-now-card ready hidden">
+                            <div class="lnc-icon" id="lnc-icon">🚶</div>
+                            <div class="lnc-text">
+                                <div class="lnc-title" id="lnc-title">Leave in -- mins</div>
+                                <div class="lnc-body" id="lnc-body">Bus is on schedule. Walk to the stop later.</div>
+                            </div>
+                            <button class="lnc-dismiss"
+                                onclick="document.getElementById('leave-now-card').classList.add('hidden')">✕</button>
+                        </div>
+
+                        <div class="sheet-dist-row">
+                            <div class="sheet-dist-box">
+                                <div class="sheet-dist-num" id="map-dist-val">--</div>
+                                <div class="sheet-dist-lbl">km away</div>
+                            </div>
+                            <div class="sheet-dist-box"
+                                style="flex: 1.5; border-left: 1px solid var(--border); padding-left: 10px;">
+                                <div class="eta-countdown" id="map-eta-val">--</div>
+                                <div class="eta-countdown-lbl">minutes (est.)</div>
+                            </div>
+                        </div>
+
+                        <!-- ✨ AI Smart Insights + Chat -->
+                        <div style="margin-top:10px; display:flex; gap:8px;">
+                            <button class="pill-btn ai-insights-btn" id="btn-ai-insight" onclick="fetchAIInsight()"
+                                style="flex:1; border-radius: 12px; font-weight: 700; padding: 10px;">
+                                ✨ AI Insights
+                            </button>
+                            <button class="pill-btn" id="btn-ai-chat" onclick="openAiChat()"
+                                style="flex:1; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
+                                🤖 Ask Assistant
+                            </button>
+                        </div>
+
+                        <div id="decision-card" class="hidden"
+                            style="margin-top:10px; padding:12px; border-radius:14px; border:1px solid #f59e0b; background: rgba(245,158,11,0.08);">
+                            <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px;">🧠 AI
+                                Decision Engine</div>
+                            <div id="decision-text" style="font-size:0.85rem; color:var(--text); line-height:1.5;">
+                                Analyzing route options...</div>
+                        </div>
+
+                        <div class="sheet-stop-row">
+                            <button class="pill-btn" id="btn-set-stop" onclick="setStopFromGPS()">
+                                <span class="pill-ico">📍</span> Set My Stop Location
+                            </button>
+                            <div class="coord-tag hidden" id="stop-coord-tag">
+                                <span class="coord-check">✅</span><span id="stop-coord-text"></span>
+                                <button class="edit-loc-btn" onclick="editStopLocation()" title="Change stop">✏️
+                                    Edit</button>
+                            </div>
+                        </div>
+
+                        <div class="slider-wrap" style="margin-top:6px">
+                            <span style="font-size:.78rem;color:var(--muted);min-width:100px">Alert radius</span>
+                            <input type="range" id="track-radius" min="0.3" max="3" step="0.1" value="1"
+                                oninput="updateRadius('track')" />
+                            <span class="slider-val" id="track-radius-val">1.0 km</span>
+                        </div>
+
+                        <div class="toggle-item" style="margin-top:4px">
+                            <span style="font-size:.85rem;color:var(--muted)">Vibration</span>
+                            <label class="tog"><input type="checkbox" id="track-vibe" checked /><span
+                                    class="tog-slider"></span></label>
+                        </div>
+                        <div class="toggle-item">
+                            <span style="font-size:.85rem;color:var(--muted)">Sound</span>
+                            <label class="tog"><input type="checkbox" id="track-sound" checked /><span
+                                    class="tog-slider"></span></label>
+                        </div>
+
+                        <div class="map-hint" id="map-status-hint">📡 Waiting for bus GPS signal...</div>
+
+                        <!-- Alert active banner with manual stop -->
+                        <div class="track-alert-banner hidden" id="track-alert-banner">
+                            <div class="tab-inner">
+                                <span>🔔 BUS NEAR YOUR STOP!</span>
+                                <button class="tal-stop-btn" onclick="stopSosAlarm('track')">✋ Stop Alarm</button>
+                            </div>
+                        </div>
+
+                        <!-- Driver "I'll Wait" response banner -->
+                        <div class="track-alert-banner hidden" id="wait-banner"
+                            style="background:linear-gradient(135deg,#059669,#047857);">
+                            <div class="tab-inner">
+                                <span>🚌 Driver is WAITING — Hurry! 🏃</span>
+                                <button class="tal-stop-btn"
+                                    onclick="document.getElementById('wait-banner').classList.add('hidden')">✓
+                                    OK</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SOS Alert overlay (track mode) -->
+                <div class="sos-overlay hidden" id="track-sos">
+                    <div class="sos-pulse-ring"></div>
+                    <div class="sos-pulse-ring delay1"></div>
+                    <div class="sos-content">
+                        <div class="sos-icon">🚌</div>
+                        <div class="sos-title">BUS IS NEAR!</div>
+                        <div class="sos-sub">Get ready at your stop — bus approaching!</div>
+                        <button class="sos-stop-btn" onclick="stopSosAlarm('track')">
+                            ✋ I'm Ready — Stop Alarm
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─────────────── DRIVER MODE ─────────────── -->
+        <section id="panel-driver" class="panel hidden">
+            <div class="section-hero driver-hero">
+                <div class="hero-emoji">🚍</div>
+                <div class="hero-text">
+                    <h2>Driver Mode</h2>
+                    <p>Enter your bus code from admin to go live.</p>
+                </div>
+            </div>
+
+            <!-- Driver Login (code entry) — shown before going live -->
+            <div id="driver-login-view">
+                <div class="block">
+                    <div class="block-label">Enter Bus Code</div>
+                    <p style="font-size:.78rem;color:var(--muted2);margin-bottom:8px">
+                        Enter the code shared by your admin to access your bus details.
+                    </p>
+                    <input class="code-input" id="driver-code-input" placeholder="e.g. KR7M" maxlength="6"
+                        oninput="this.value=this.value.toUpperCase()"
+                        onkeydown="if(event.key==='Enter')driverLoginByCode()" />
+                    <button class="main-btn" id="btn-verify-driver" style="margin-top:8px;padding:12px;font-size:.88rem"
+                        onclick="driverLoginByCode()">🔍 Verify Code</button>
+                    <div id="driver-code-status"
+                        style="font-size:.8rem;text-align:center;min-height:20px;margin-top:6px"></div>
+                </div>
+
+                <!-- Pre-filled bus info card (shown after code verified) -->
+                <div id="driver-bus-preview" class="hidden" style="margin-top:4px">
+                    <div class="block" style="border-color:#86efac;background:#f0fdf4">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+                            <span style="font-size:1.4rem">🚌</span>
+                            <div>
+                                <div style="font-weight:800;font-size:1rem" id="dp-busnum">--</div>
+                                <div style="font-size:.78rem;color:var(--muted2)" id="dp-route">--</div>
+                            </div>
+                        </div>
+                        <div style="font-size:.75rem;color:var(--muted2)" id="dp-stops"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live stats card (shown when live) -->
+            <div id="driver-live-card" class="driver-live-card hidden">
+                <div class="dlc-top">
+                    <div class="dlc-live-badge">
+                        <div class="live-dot-anim"></div> LIVE
+                    </div>
+                    <div class="dlc-busnum" id="dlc-busnum">Bus --</div>
+                </div>
+                <div class="dlc-route" id="dlc-route">--</div>
+                <div class="dlc-stats">
+                    <div class="dlc-stat">
+                        <div class="dlc-stat-val" id="dlc-updates">0</div>
+                        <div class="dlc-stat-lbl">GPS Packets</div>
+                    </div>
+                    <div class="dlc-stat">
+                        <div class="dlc-stat-val" id="dlc-accuracy">--</div>
+                        <div class="dlc-stat-lbl">Accuracy (m)</div>
+                    </div>
+                    <div class="dlc-stat">
+                        <div class="dlc-stat-val" id="dlc-time">--</div>
+                        <div class="dlc-stat-lbl">Last Update</div>
+                    </div>
+                </div>
+                <div class="dlc-coords" id="dlc-coords">Fetching GPS...</div>
+
+                <!-- Crowd Selector -->
+                <div class="block" style="margin-top: 10px; padding: 10px; border-color: var(--border);">
+                    <div class="block-label" style="font-size: .75rem;">👥 Bus Crowd Level</div>
+                    <div class="crowd-selector">
+                        <button class="crowd-btn active-crowd" onclick="setDriverCrowd('light', this)">🟢 Empty</button>
+                        <button class="crowd-btn" onclick="setDriverCrowd('moderate', this)">🟡 Half</button>
+                        <button class="crowd-btn" onclick="setDriverCrowd('heavy', this)">🔴 Full</button>
+                    </div>
+                </div>
+
+                <!-- 🚀 AI Scenario Simulator -->
+                <div class="block"
+                    style="margin-top: 10px; padding: 10px; border-color: #3b82f6; background: rgba(59, 130, 246, 0.05);">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div class="block-label" style="font-size: .75rem; color:#3b82f6; margin:0;">🤖 AI Dynamic
+                            Simulation</div>
+                        <label class="tog"><input type="checkbox" id="sim-drive-toggle"
+                                onchange="toggleAiSimulation()" /><span class="tog-slider"></span></label>
+                    </div>
+                    <p style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">Instead of using your phone's
+                        real GPS, the AI will autonomously drive the bus on the map, slowing down at stops.</p>
+
+                    <div style="margin-top: 10px;" id="sim-controls" class="hidden">
+                        <div class="block-label" style="font-size: .7rem;">🚦 Inject Live Scenarios</div>
+                        <div class="crowd-selector" style="grid-template-columns: 1fr 1fr;">
+                            <button class="crowd-btn active-crowd" id="sim-scenario-clear"
+                                onclick="setScenario('clear', this)">🟢 Clear Traffic</button>
+                            <button class="crowd-btn" id="sim-scenario-jam" onclick="setScenario('jam', this)">🔴
+                                Traffic Jam</button>
+                            <button class="crowd-btn" id="sim-scenario-rain" onclick="setScenario('rain', this)">🌧️
+                                Rain Event</button>
+                            <button class="crowd-btn" id="sim-scenario-breakdown"
+                                onclick="setScenario('breakdown', this)">⚠️ Breakdown</button>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #a855f7; margin-top: 6px; font-weight: 600;"
+                            id="sim-status-text">Simulating steady traffic...</div>
+                    </div>
+                </div>
+
+                <!-- Access Code Display (for students) -->
+                <div class="access-code-box">
+                    <div class="acb-label">📢 Share this code with students:</div>
+                    <div class="acb-code" id="dlc-access-code">----</div>
+                    <div class="acb-hint">Students enter this code to track your bus</div>
+                </div>
+
+                <!-- Missed-Stop Alert Notification (for driver) -->
+                <div class="driver-alert-card hidden" id="driver-alert-card">
+                    <div class="dac-icon">🆘</div>
+                    <div class="dac-body">
+                        <strong id="dac-name">Student</strong> missed the stop!
+                        <div class="dac-loc" id="dac-loc">--</div>
+                    </div>
+                    <div class="dac-actions">
+                        <button class="dac-wait-btn" id="dac-wait-btn" onclick="driverPressedWait()">⏳ I'll
+                            Wait</button>
+                        <button class="dac-dismiss-btn" onclick="driverDismissAlert()">✕</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Go Live button -->
+            <button class="main-btn driver-btn hidden" id="btn-driver" onclick="toggleDriver()">
+                <span id="driver-btn-label">🟢 &nbsp;Go Live — Share Location</span>
+            </button>
+        </section>
+
+    </div>
+
+    <!-- Code Verify Modal (shown when tapping Track from search results) -->
+    <div id="code-verify-modal" class="modal-bg hidden">
+        <div class="modal-box">
+            <div class="modal-title">🔑 Enter Bus Code</div>
+            <p class="modal-desc">
+                Enter the <strong>4-digit code</strong> your driver shared.<br>
+                Only students with the correct code can track this bus.
+            </p>
+            <div class="cv-bus-info" id="cv-bus-info"></div>
+            <div class="block">
+                <div class="block-label">Access Code</div>
+                <input class="code-input" id="cv-code-input" placeholder="e.g. KR7M" maxlength="6"
+                    oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')verifyAndTrack()" />
+            </div>
+            <div class="cv-error hidden" id="cv-error">❌ Wrong code. Ask your driver for today's code.</div>
+            <div class="modal-actions">
+                <button class="pill-btn" onclick="closeCodeVerifyModal()">Cancel</button>
+                <button class="main-btn" onclick="verifyAndTrack()"
+                    style="flex:1;padding:13px;background:var(--track-accent);color:white">
+                    🔓 Verify &amp; Track
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Miss-Stop Modal -->
+    <div id="miss-stop-modal" class="modal-bg hidden">
+        <div class="modal-box">
+            <div class="modal-title">🆘 Alert Driver</div>
+            <p class="modal-desc">Driver missed your stop? Send your name & location to the driver.</p>
+            <div class="block">
+                <div class="block-label">Your Name</div>
+                <input class="field" id="miss-stop-name" placeholder="Enter your name" />
+            </div>
+            <div id="miss-stop-status" style="font-size:.82rem;color:var(--green);min-height:20px;text-align:center">
+            </div>
+            <div class="modal-actions">
+                <button class="pill-btn" onclick="closeMissStopModal()">Cancel</button>
+                <button class="main-btn" onclick="sendMissStopAlert()"
+                    style="flex:1;padding:12px;background:var(--red);color:white">📤 Send Alert</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Insights Modal -->
+    <div id="ai-modal" class="modal-bg hidden">
+        <div class="modal-box" style="border-color: #8b5cf6;">
+            <div class="modal-title" style="color: #8b5cf6;">✨ AI Route Insights</div>
+            <p class="modal-desc" id="ai-response-text"
+                style="text-align: left; line-height: 1.5; font-size: 0.9rem; margin-top: 10px;">
+                Analyzing current route, traffic, and bus schedule...
+            </p>
+            <div class="modal-actions" style="margin-top: 15px;">
+                <button class="main-btn" onclick="document.getElementById('ai-modal').classList.add('hidden')"
+                    style="width: 100%; background: var(--surface); color: var(--text);">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🤖 AI Chat Assistant Modal -->
+    <div id="ai-chat-modal" class="modal-bg hidden">
+        <div class="modal-box" style="border-color: #10b981; max-height: 90vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div class="modal-title" style="color: #10b981; margin:0;">🤖 Bus AI Assistant</div>
+                <button onclick="document.getElementById('ai-chat-modal').classList.add('hidden')"
+                    style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);">✕</button>
+            </div>
+            <p style="font-size:0.75rem; color:var(--muted); margin: 4px 0 8px;">Ask anything about your bus, route, or
+                ETA.</p>
+            <!-- Messages -->
+            <div id="chat-messages"
+                style="flex:1; overflow-y:auto; max-height:300px; display:flex; flex-direction:column; gap:8px; padding:4px 0;">
+            </div>
+            <!-- Input -->
+            <div style="display:flex; gap:8px; margin-top:10px;">
+                <input id="chat-input" class="field" placeholder="e.g. Is my bus delayed?" style="flex:1; margin:0;"
+                    onkeydown="if(event.key==='Enter') sendChatMessage()" />
+                <button class="main-btn" onclick="sendChatMessage()" style="padding:10px 16px; white-space:nowrap;">Send
+                    ➤</button>
+            </div>
+            <!-- Quick Prompts -->
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                <button class="pill-btn" onclick="quickChat('When will my bus arrive?')"
+                    style="font-size:0.72rem; padding:5px 9px;">⏱ ETA?</button>
+                <button class="pill-btn" onclick="quickChat('Is the bus delayed?')"
+                    style="font-size:0.72rem; padding:5px 9px;">⚠️ Delayed?</button>
+                <button class="pill-btn" onclick="quickChat('How crowded is it?')"
+                    style="font-size:0.72rem; padding:5px 9px;">👥 Crowd?</button>
+                <button class="pill-btn" onclick="quickChat('Should I leave now?')"
+                    style="font-size:0.72rem; padding:5px 9px;">🏃 Leave now?</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Install App Banner -->
+    <div id="install-banner" class="install-banner hidden">
+        <div class="install-content">
+            <span class="install-icon">🚌</span>
+            <div class="install-text">
+                <strong>Install BusAlert</strong>
+                <span>Add to home screen for quick access</span>
+            </div>
+        </div>
+        <div class="install-actions">
+            <button class="install-dismiss" onclick="dismissInstall()">Not now</button>
+            <button class="install-btn" onclick="doInstall()">Install App</button>
+        </div>
+    </div>
+
+    <!-- Admin Iframe Overlay (Keeps it on single page) -->
+    <div id="admin-frame-wrap" class="hidden"
+        style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:var(--bg)">
+        <iframe id="admin-iframe" src="" style="width:100%;height:100%;border:none;"></iframe>
+    </div>
+
+    <!-- Offline Indicator -->
+    <div id="offline-badge" class="offline-badge">⚡ Offline - Waiting for network</div>
+
+    <!-- Scripts -->
+    <script src="app.js?v=6"></script>
+</body>
+
+</html>
