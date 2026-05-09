@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
         rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=7" />
+    <link rel="stylesheet" href="style.css?v=8" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -571,9 +571,10 @@
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow: visible; /* Changed from hidden to allow button to stick out */
             flex-shrink: 0;
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative; /* Base for button */
         }
 
         .sidebar.collapsed {
@@ -651,15 +652,11 @@
             }
 
             .sidebar-toggle-btn {
-                left: 320px;
-                top: 80px; /* Lower on mobile for thumb reach */
+                left: 100%;
+                top: 80px; 
                 width: 44px;
                 height: 70px;
                 font-size: 1.2rem;
-            }
-
-            .sidebar.collapsed + .map-section .sidebar-toggle-btn {
-                left: 0;
             }
 
             .info-panel {
@@ -818,7 +815,7 @@
         .sidebar-toggle-btn {
             position: absolute;
             top: 24px;
-            left: 0;
+            left: 100%; /* Glued to the right edge of sidebar */
             z-index: 2100;
             background: var(--primary);
             border: none;
@@ -1380,14 +1377,15 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Sidebar Toggle Button (Moved inside sidebar for perfect sync) -->
+                <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar">
+                    <span id="sb-toggle-icon">◀</span>
+                </button>
             </div>
 
             <!-- Map Area -->
             <div class="map-section">
-                <!-- Sidebar Toggle Button -->
-                <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar">
-                    <span id="sb-toggle-icon">◀</span>
-                </button>
                 <div id="admin-map"></div>
             </div>
 
