@@ -606,6 +606,91 @@
             transition: all .2s;
         }
 
+        /* ── Responsive Admin ── */
+        @media (max-width: 1024px) {
+            .admin-header {
+                padding: 12px 16px;
+                gap: 12px;
+            }
+
+            .admin-brand-name {
+                display: none;
+            }
+
+            .admin-nav {
+                gap: 8px;
+                flex: 1;
+                justify-content: flex-end;
+            }
+
+            .admin-nav-stat {
+                padding: 8px 10px;
+                font-size: 0.75rem;
+            }
+
+            .admin-nav-item {
+                padding: 8px 12px;
+                font-size: 0.75rem;
+            }
+
+            .sidebar {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 320px;
+                z-index: 2000;
+                box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+                transform: translateX(0);
+                background: rgba(15, 23, 42, 0.95);
+            }
+
+            .sidebar.collapsed {
+                transform: translateX(-100%);
+                width: 320px; /* Keep width for animation */
+            }
+
+            .sidebar-toggle-btn {
+                left: 0;
+                width: 48px;
+                height: 48px;
+                border-radius: 0 12px 12px 0;
+                background: var(--primary);
+                color: white;
+                box-shadow: 4px 0 15px rgba(0,0,0,0.3);
+            }
+
+            .sidebar.collapsed + .map-section .sidebar-toggle-btn {
+                left: 0;
+            }
+
+            .info-panel {
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                border-radius: 32px 32px 0 0 !important;
+                padding-bottom: 40px !important;
+                background: rgba(15, 23, 42, 0.9);
+                backdrop-filter: blur(30px);
+                border-bottom: none !important;
+            }
+
+            .info-panel.show {
+                transform: translateY(0);
+            }
+
+            #admin-map {
+                height: 100% !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .admin-nav-stat:first-of-type {
+                display: none;
+            }
+        }
+
         .refresh-btn:hover {
             color: var(--primary);
             border-color: var(--primary);
@@ -1387,6 +1472,13 @@
             currentUser = user.uid;
             localStorage.setItem('ba_admin_uid', user.uid);
             document.getElementById('admin-shell').style.display = 'flex';
+            
+            // Auto-collapse sidebar on mobile
+            if (window.innerWidth < 1024) {
+                document.querySelector('.sidebar').classList.add('collapsed');
+                document.getElementById('sb-toggle-icon').textContent = '▶';
+            }
+            
             initAdmin();
         }
 
