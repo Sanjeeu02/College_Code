@@ -285,21 +285,15 @@ function connectFb(cfg) {
     S.fbOk = true;
     setStatus('Connected', true);
 
-    S.fbOk = true;
-    setStatus('Connected', true);
-
-    S.fbOk = true;
-    setStatus('Connected', true);
-
     // ⚡ Unified Auth Handler (Handles both normal load and redirects)
     let redirectHandled = false;
 
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
         redirectHandled = true;
-        showToast('👋 Sign-in confirmed. Loading your data...');
         const user = result.user;
         S.user = user;
+        showToast('🌐 Google Sign-in successful!');
         
         let role = await getRoleByUid(user.uid);
         if (!role) {
@@ -308,6 +302,7 @@ function connectFb(cfg) {
           if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
           else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
           else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+          showToast(`✅ Registered as ${role}`);
         }
         
         S.role = role;
@@ -316,23 +311,24 @@ function connectFb(cfg) {
         handleAuthSuccess(user);
       }
     }).catch(e => {
+      console.error("Redirect Auth Error:", e);
       if (e.code === 'auth/unauthorized-domain') {
         const d = window.location.hostname;
-        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br><br>Add to Firebase Console.`;
+        q('#auth-err').innerHTML = `❌ Domain <b>${d}</b> not authorized.<br>Add it in Firebase Console.`;
       } else {
-        showToast('⚠️ Auth Error: ' + e.message);
+        showToast('❌ Auth Error: ' + e.message);
       }
     });
 
     S.auth.onAuthStateChanged(async user => {
-      // Small delay to let redirect handler take precedence
       setTimeout(async () => {
-        if (redirectHandled) return; // Let redirect handler finish
-        
-        if (S.user && S.role) return; // Already handled
+        if (redirectHandled) return;
+        if (S.user && S.role) return;
         
         if (user) {
           S.user = user;
+          
+          // 1. Try Cache
           const cachedRole = localStorage.getItem('ba_cached_role');
           if (cachedRole) {
             S.role = cachedRole;
@@ -340,9 +336,25 @@ function connectFb(cfg) {
             return;
           }
 
+          // 2. Try DB
           S.role = await getRoleByUid(user.uid);
+          
+          // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
+          if (!S.role) {
+            const pendingRole = localStorage.getItem('ba_pending_role');
+            if (pendingRole) {
+              S.role = pendingRole;
+              const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
+              if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+              else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+              else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+              
+              localStorage.setItem('ba_cached_role', S.role);
+              localStorage.removeItem('ba_pending_role');
+            }
+          }
+
           if (S.role) {
-            localStorage.setItem('ba_cached_role', S.role);
             handleAuthSuccess(user);
           } else {
             showRoleScreen();
@@ -351,7 +363,7 @@ function connectFb(cfg) {
           localStorage.removeItem('ba_cached_role');
           showRoleScreen();
         }
-      }, 500);
+      }, 800); // Slightly longer delay to ensure Firestore is ready
     });
 
     startBusListener();
@@ -1731,19 +1743,26 @@ async function doInstall() {
 }
 
 // ─── THEME TOGGLE (DARK/LIGHT) ───────────────────────────────────
-function initTheme() {
-  const savedTheme = lsGet('ba_theme');
-  if (savedTheme === 'dark') {
+function applyTheme(theme) {
+  if (theme === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
-  } else if (!savedTheme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    document.documentElement.setAttribute('data-theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
   }
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+}
+
+function initTheme() {
+  // Default = light. Only switch to dark if explicitly saved.
+  const savedTheme = lsGet('ba_theme') || 'light';
+  applyTheme(savedTheme);
 }
 
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme');
   const newTheme = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', newTheme);
+  applyTheme(newTheme);
   lsSet('ba_theme', newTheme);
 }
 
