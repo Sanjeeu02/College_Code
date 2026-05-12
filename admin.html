@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
         rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=12" />
+    <link rel="stylesheet" href="style.css?v=19" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -1465,11 +1465,56 @@
         let isRegisterMode = false;
 
 
+        let currentCollegeCode = null;
+
         function handleAuthSuccess(user) {
             currentUser = user.uid;
             localStorage.setItem('ba_admin_uid', user.uid);
+            
+            // Fetch admin profile to get collegeCode
+            adminDb.collection('admins').doc(user.uid).get().then(doc => {
+                if (doc.exists && doc.data().collegeCode) {
+                    currentCollegeCode = doc.data().collegeCode;
+                    finishAdminLogin();
+                } else {
+                    const code = prompt("Please register a unique College Code for your institution (e.g., SRM123):");
+                    if (code && code.trim()) {
+                        const cleanCode = code.trim().toUpperCase().replace(/\s/g, '');
+                        studentDb.collection('colleges').doc(cleanCode).get().then(collegeDoc => {
+                            if (collegeDoc.exists) {
+                                alert("College Code already in use! Please login again and pick a different one.");
+                                auth.signOut();
+                            } else {
+                                studentDb.collection('colleges').doc(cleanCode).set({
+                                    name: cleanCode + " College",
+                                    adminUid: user.uid,
+                                    createdAt: Date.now()
+                                }).then(() => {
+                                    adminDb.collection('admins').doc(user.uid).update({ collegeCode: cleanCode }).then(() => {
+                                        currentCollegeCode = cleanCode;
+                                        finishAdminLogin();
+                                    });
+                                });
+                            }
+                        });
+                    } else {
+                        auth.signOut();
+                    }
+                }
+            }).catch(e => {
+                console.error(e);
+                alert("Error checking Admin profile.");
+                auth.signOut();
+            });
+        }
+
+        function finishAdminLogin() {
             document.getElementById('admin-shell').style.display = 'flex';
             
+            // Update UI to show college code
+            const badge = document.querySelector('.admin-brand-badge');
+            if (badge) badge.textContent = currentCollegeCode + " ADMIN";
+
             // Auto-collapse sidebar on mobile
             if (window.innerWidth < 1024) {
                 document.querySelector('.sidebar').classList.add('collapsed');
@@ -1572,7 +1617,7 @@
 
         // ── BUS PROFILES (Admin creates these) ──
         function listenProfiles() {
-            db.ref('bus_profiles').on('value', snap => {
+            db.ref('colleges/' + currentCollegeCode + '/bus_profiles').on('value', snap => {
                 const raw = snap.val() || {};
                 allProfiles = {};
                 Object.entries(raw).forEach(([id, p]) => {
@@ -1606,7 +1651,7 @@
                 createdBy: currentUser
             };
 
-            db.ref(`bus_profiles/${profileId}`).set(profileData).then(() => {
+            db.ref(`colleges/${currentCollegeCode}/bus_profiles/${profileId}`).set(profileData).then(() => {
                 // Show generated code
                 const resultEl = document.getElementById('code-result');
                 resultEl.style.display = 'block';
@@ -1651,7 +1696,7 @@
 
         function deleteProfile(id) {
             if (!confirm('Delete this bus profile? The driver will no longer be able to use its code.')) return;
-            db.ref(`bus_profiles/${id}`).remove();
+            db.ref(`colleges/${currentCollegeCode}/bus_profiles/${id}`).remove();
         }
 
         // ── LIVE BUSES ──
@@ -1662,7 +1707,7 @@
         const DELETE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
 
         function listenBuses() {
-            db.ref('buses').on('value', snap => {
+            db.ref('colleges/' + currentCollegeCode + '/buses').on('value', snap => {
                 const rawBuses = snap.val() || {};
                 allBuses = {};
                 liveBuses = {};
@@ -1675,7 +1720,7 @@
 
                     // Skip and delete inactive entries
                     if (!b.active) {
-                        db.ref(`buses/${id}`).remove();
+                        db.ref(`colleges/${currentCollegeCode}/buses/${id}`).remove();
                         if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
                         return;
                     }
@@ -1685,7 +1730,7 @@
 
                     // Auto-delete entries older than 24 hours
                     if (age > DELETE_THRESHOLD) {
-                        db.ref(`buses/${id}`).remove();
+                        db.ref(`colleges/${currentCollegeCode}/buses/${id}`).remove();
                         if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
                         return;
                     }
@@ -1702,7 +1747,7 @@
         }
 
         function listenAlerts() {
-            db.ref('student_alerts').on('value', snap => {
+            db.ref('colleges/' + currentCollegeCode + '/student_alerts').on('value', snap => {
                 const alerts = snap.val() || {};
                 // Filter alerts: only show for buses managed by this admin
                 const myAlerts = {};
@@ -1765,7 +1810,7 @@
         function clearAllHistory() {
             if (!confirm('Delete all past bus tracking sessions?')) return;
             Object.keys(historyBuses).forEach(id => {
-                db.ref(`buses/${id}`).remove();
+                db.ref(`colleges/${currentCollegeCode}/buses/${id}`).remove();
                 if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
             });
         }
@@ -1880,7 +1925,7 @@
             document.getElementById('total-count').textContent = totalProfiles;
         }
 
-        function refreshBuses() { if (db) db.ref('buses').once('value', snap => { allBuses = snap.val() || {}; renderSidebar(); updateMapMarkers(); updateCounts(); }); }
+        function refreshBuses() { if (db) db.ref('colleges/' + currentCollegeCode + '/buses').once('value', snap => { allBuses = snap.val() || {}; renderSidebar(); updateMapMarkers(); updateCounts(); }); }
 
         function timeAgo(ts) {
             if (!ts) return 'never';

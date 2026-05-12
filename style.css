@@ -1110,9 +1110,12 @@ body {
    LIVE MAP VIEW
    ================================================================ */
 #panel-find {
+  display: flex;
+  flex-direction: column;
   gap: 0;
   padding: 0;
   overflow: hidden;
+  height: calc(100vh - 120px);
 }
 
 #code-entry-view {
@@ -1137,7 +1140,8 @@ body {
 #map-view {
   position: relative;
   flex: 1;
-  height: calc(100vh - 120px);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -3218,3 +3222,93 @@ body {
   margin-top: 12px;
   min-height: 1.2rem;
 }
+
+/* ================================================================
+   PREMIUM BUS CARD V4 UI
+   ================================================================ */
+.bus-card-v4 {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.bus-card-v4:hover, .bus-card-v4:active {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+  border-color: var(--primary);
+}
+
+.bus-card-v4::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--primary), #a855f7);
+  border-radius: 16px 0 0 16px;
+}
+
+.bus-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bus-card-info h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bus-card-info p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bus-card-track {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.bus-card-v4:hover .bus-card-track {
+  background: var(--primary);
+  color: white;
+}
+
+[data-theme="dark"] .bus-card-v4 {
+  background: rgba(30, 30, 30, 0.6);
+  backdrop-filter: blur(10px);
+  border-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .bus-card-v4:hover {
+  border-color: var(--primary);
+  background: rgba(40, 40, 40, 0.8);
+}
+

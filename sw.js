@@ -3,7 +3,7 @@
    Enables: App install + Offline support + iOS notifications
    ============================================= */
 
-const CACHE = 'busAlert-v24';
+const CACHE = 'busAlert-v27';
 const FILES = [
     '/',
     '/index.html',
@@ -44,7 +44,8 @@ self.addEventListener('fetch', e => {
     // Ignore external APIs and maps
     if (url.includes('firebaseio.com') || url.includes('tile.openstreetmap') || url.includes('googleapis.com') || url.includes('osrm.org')) return;
 
-    const isCoreFile = url.endsWith('/') || url.endsWith('.html') || url.endsWith('app.js') || url.endsWith('ai-engine.js') || url.endsWith('style.css');
+    const baseUrl = url.split('?')[0];
+    const isCoreFile = baseUrl.endsWith('/') || baseUrl.endsWith('.html') || baseUrl.endsWith('app.js') || baseUrl.endsWith('ai-engine.js') || baseUrl.endsWith('style.css');
 
     e.respondWith((async () => {
         try {

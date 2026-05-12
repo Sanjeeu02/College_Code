@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
-    <link rel="stylesheet" href="style.css?v=17" />
+    <link rel="stylesheet" href="style.css?v=19" />
     
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -83,7 +83,7 @@
             <!-- Form Side -->
             <div class="auth-v4-left">
                 <div class="auth-v4-box">
-                    <button class="back-btn-v4" onclick="backToRoles()">←</button>
+                    
                     
                     <div class="auth-v4-header">
                         <div class="auth-v4-logo">🚌</div>
@@ -144,6 +144,28 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ── COLLEGE CODE SCREEN ── -->
+    <div id="college-code-screen" class="role-screen hidden">
+        <div class="bg-blobs">
+            <div class="blob blob-1"></div>
+            <div class="blob blob-2"></div>
+        </div>
+        <div class="role-box" style="max-width: 400px;">
+            <h1 class="role-title">College Verification</h1>
+            <p class="role-sub" style="margin-bottom: 24px;">Enter the secure code provided by your college administration.</p>
+            
+            <div class="field-group-v4" style="text-align: left;">
+                <label>College Code</label>
+                <input type="text" id="college-code-input" placeholder="e.g. SRM123" oninput="this.value=this.value.toUpperCase().replace(/\s/g, '')" />
+            </div>
+            
+            <div id="cc-error" class="auth-err"></div>
+            
+            <button class="submit-btn-v4" style="margin-top: 16px;" onclick="verifyCollegeCode()">Connect to College</button>
+            <button class="pill-btn" style="margin-top: 12px; width: 100%; border: 1px solid var(--border);" onclick="handleLogout()">Cancel & Logout</button>
         </div>
     </div>
 

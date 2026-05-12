@@ -37,7 +37,7 @@ const S = {
   myStudentName: '',
 
   // Auth & Role
-  auth: null, user: null, role: null, isRegisterMode: false, selectedRole: null,
+  auth: null, user: null, role: null, isRegisterMode: false, selectedRole: null, collegeCode: null,
 };
 
 // ─── BUS POLLER (backup for Firebase listener) ──────────────────
@@ -382,7 +382,7 @@ function connectFb(cfg) {
 // ─── REAL-TIME BUS LISTENER ──────────────────────────────────────
 function startBusListener() {
   if (!S.db) return;
-  S.db.ref('buses').on('value', snap => {
+  S.db.ref('colleges/' + S.collegeCode + '/buses').on('value', snap => {
     S.allBuses = snap.val() || {};
     _handleBusUpdate();
   });
@@ -425,6 +425,10 @@ function switchTab(tab) {
   });
   if (tab === 'find') {
     if (S.trackOn && !S.map) initMap();
+    if (S.trackOn && S.map) {
+      setTimeout(() => S.map.invalidateSize(), 100);
+      setTimeout(() => S.map.invalidateSize(), 400);
+    }
     renderBusList(q('#route-search')?.value?.trim() || '');
   }
 }
@@ -455,7 +459,7 @@ function findBusByCode() {
   }
 
   // Try Firebase live query in case allBuses not fully loaded yet
-  S.db.ref('buses').orderByChild('accessCode').equalTo(code).once('value', snap => {
+  S.db.ref('colleges/' + S.collegeCode + '/buses').orderByChild('accessCode').equalTo(code).once('value', snap => {
     const data = snap.val();
     if (!data) {
       q('#code-status').textContent = '❌ No bus found with this code. Check with driver.';
@@ -647,7 +651,7 @@ function startBusPoller(busId) {
   stopBusPoller();
   _busPoller = setInterval(() => {
     if (!S.trackOn || !S.trackedId || !S.db) { stopBusPoller(); return; }
-    S.db.ref(`buses/${S.trackedId}/location`).once('value', snap => {
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.trackedId}/location`).once('value', snap => {
       const loc = snap.val();
       if (loc && loc.lat && loc.lon) {
         // Update allBuses cache
@@ -675,7 +679,7 @@ function refreshTracking() {
   const btn = q('#btn-refresh-map');
   if (btn) { btn.classList.add('spinning'); setTimeout(() => btn.classList.remove('spinning'), 1000); }
 
-  S.db.ref(`buses/${S.trackedId}`).once('value', snap => {
+  S.db.ref(`colleges/${S.collegeCode}/buses/${S.trackedId}`).once('value', snap => {
     const data = snap.val();
     if (data) {
       S.allBuses[S.trackedId] = data;
@@ -1168,7 +1172,7 @@ function driverLoginByCode() {
   statusEl.style.color = 'var(--muted2)';
 
   // Fetch all profiles and find locally (avoids Firebase index requirement errors)
-  S.db.ref('bus_profiles').once('value', snap => {
+  S.db.ref('colleges/' + S.collegeCode + '/bus_profiles').once('value', snap => {
     const data = snap.val();
     if (!data) {
       statusEl.textContent = '❌ No bus profiles found. Contact admin.';
@@ -1248,11 +1252,11 @@ function startDriver(resuming = false) {
   else showToast(`🔄 Resumed: Bus ${num}`);
 
   // Automatically stop/hide the bus on the admin map if the driver closes the web page or loses connection
-  S.db.ref(`buses/${S.driverBusId}`).onDisconnect().update({ active: false });
+  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().update({ active: false });
 
   // Explicitly set the entire payload to true immediately before waiting for GPS. 
   // We use .update() so we don't accidentally wipe location data if this is a resume
-  S.db.ref(`buses/${S.driverBusId}`).update({
+  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
     busNumber: num,
     route: route || '',
     stops: stops || [],
@@ -1405,8 +1409,8 @@ function stopDriver() {
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
   if (S.db && S.driverBusId) {
-    S.db.ref(`buses/${S.driverBusId}`).onDisconnect().cancel();
-    S.db.ref(`buses/${S.driverBusId}`).remove();
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().cancel();
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).remove();
   }
 
   // Clear session
@@ -1448,7 +1452,7 @@ function onDriverPos(pos) {
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   // Use update instead of just setting location node, so onDisconnect doesn't ruin the object if it reconnects
-  S.db.ref(`buses/${S.driverBusId}`).update({
+  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
     active: true,
     'location/lat': lat,
     'location/lon': lon,
@@ -1493,7 +1497,7 @@ function sendMissStopAlert() {
       active: true,
       driverWaiting: false,
     };
-    S.db.ref(`student_alerts/${S.trackedId}_${Date.now()}`).set(alertData).then(() => {
+    S.db.ref(`colleges/${S.collegeCode}/student_alerts/${S.trackedId}_${Date.now()}`).set(alertData).then(() => {
       q('#miss-stop-status').textContent = '✅ Alert sent! Driver has been notified.';
       q('#miss-stop-status').style.color = 'var(--green)';
       showToast('🆘 Driver alerted with your location!');
@@ -1514,7 +1518,7 @@ function sendMissStopAlert() {
 function listenForDriverWait(myName) {
   // Listen for driver pressing "I'll wait" for alerts sent by this student to this bus
   if (!S.db || !S.trackedId) return;
-  S.db.ref('student_alerts').orderByChild('busId').equalTo(S.trackedId).on('value', snap => {
+  S.db.ref('colleges/' + S.collegeCode + '/student_alerts').orderByChild('busId').equalTo(S.trackedId).on('value', snap => {
     const data = snap.val() || {};
     Object.values(data).forEach(a => {
       if (a.studentName === myName && a.driverWaiting) {
@@ -1537,7 +1541,7 @@ function showDriverWaitingNotification() {
 // ─── DRIVER sees student alert ─────────────────────────────────
 function listenDriverAlerts() {
   if (!S.db || !S.driverBusId) return;
-  S.db.ref('student_alerts').orderByChild('busId').equalTo(S.driverBusId).on('value', snap => {
+  S.db.ref('colleges/' + S.collegeCode + '/student_alerts').orderByChild('busId').equalTo(S.driverBusId).on('value', snap => {
     const data = snap.val() || {};
     const active = Object.entries(data).filter(([, a]) => a.active && !a.driverWaiting);
     if (!active.length) { q('#driver-alert-card')?.classList.add('hidden'); return; }
@@ -1553,7 +1557,7 @@ function listenDriverAlerts() {
 function driverPressedWait() {
   const alertId = q('#dac-wait-btn').dataset.alertId;
   if (!alertId || !S.db) return;
-  S.db.ref(`student_alerts/${alertId}`).update({ driverWaiting: true });
+  S.db.ref(`colleges/${S.collegeCode}/student_alerts/${alertId}`).update({ driverWaiting: true });
   q('#dac-wait-btn').textContent = '✅ Waiting...';
   q('#dac-wait-btn').style.background = '#16a34a';
   showToast('✅ Student has been notified you\'re waiting!');
@@ -1562,7 +1566,7 @@ function driverPressedWait() {
 function driverDismissAlert() {
   const alertId = q('#dac-wait-btn').dataset.alertId;
   if (!alertId || !S.db) return;
-  S.db.ref(`student_alerts/${alertId}`).update({ active: false });
+  S.db.ref(`colleges/${S.collegeCode}/student_alerts/${alertId}`).update({ active: false });
   q('#driver-alert-card').classList.add('hidden');
 }
 
@@ -1777,7 +1781,7 @@ function setDriverCrowd(level, btnEl) {
 
   // Update Firebase if driver is live
   if (S.driverOn && S.driverBusId && S.db) {
-    S.db.ref(`buses/${S.driverBusId}`).update({ crowdLevel: level })
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({ crowdLevel: level })
       .then(() => showToast(`Crowd level set to ${level}`))
       .catch(e => showToast('Failed to update crowd level'));
   }
@@ -1910,11 +1914,11 @@ async function fetchAIInsight() {
 // ─── ROLE & AUTH LOGIC ──────────────────────────────────────────
 async function getRoleByUid(uid) {
   let doc = await S.studentDb.collection('students').doc(uid).get();
-  if (doc.exists) return 'student';
+  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'student'; }
   doc = await S.driverDb.collection('drivers').doc(uid).get();
-  if (doc.exists) return 'driver';
+  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'driver'; }
   doc = await S.adminDb.collection('admins').doc(uid).get();
-  if (doc.exists) return 'admin';
+  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'admin'; }
   return null;
 }
 
@@ -2090,6 +2094,11 @@ function handleAuthSuccess(user) {
   q('#role-screen').classList.add('hidden');
   q('#auth-screen').classList.add('hidden');
   
+  if (S.role !== 'admin' && !S.collegeCode) {
+    q('#college-code-screen').classList.remove('hidden');
+    return;
+  }
+  
   // Admin users are redirected to the full admin portal
   if (S.role === 'admin') {
     window.location.href = 'admin.html';
@@ -2097,10 +2106,52 @@ function handleAuthSuccess(user) {
   }
 
   // Students and Drivers get the main app
+  q('#college-code-screen').classList.add('hidden');
   q('#app').classList.remove('hidden');
   updateUIByRole();
   renderProfileInfo();
   showToast(`👋 Welcome, ${user.displayName || 'User'}!`);
+}
+
+async function verifyCollegeCode() {
+  const code = q('#college-code-input').value.trim().toUpperCase();
+  const err = q('#cc-error');
+  if (!code) { err.textContent = '⚠️ Please enter a college code.'; err.classList.remove('hidden'); return; }
+  
+  err.textContent = '⏳ Verifying code...';
+  err.classList.remove('hidden');
+  err.style.color = 'var(--text)';
+  
+  try {
+    const doc = await S.studentDb.collection('colleges').doc(code).get();
+    if (!doc.exists) {
+      err.textContent = '❌ Invalid College Code. Please check with your admin.';
+      err.style.color = 'var(--red)';
+      return;
+    }
+    
+    // Save to user profile
+    if (S.role === 'student') await S.studentDb.collection('students').doc(S.user.uid).update({ collegeCode: code });
+    else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(S.user.uid).update({ collegeCode: code });
+    
+    S.collegeCode = code;
+    err.textContent = '✅ Verified! Logging in...';
+    err.style.color = 'var(--green)';
+    
+    setTimeout(() => {
+      // Re-initialize listener with isolated path
+      if (S.db) {
+        S.db.ref('colleges/' + S.collegeCode + '/buses').off(); // turn off old
+        startBusListener(); 
+      }
+      handleAuthSuccess(S.user);
+    }, 1000);
+    
+  } catch (e) {
+    console.error("College Code Error:", e);
+    err.textContent = '❌ Error verifying code: ' + e.message;
+    err.style.color = 'var(--red)';
+  }
 }
 
 // ─── PROFILE LOGIC ──────────────────────────────────────────────
