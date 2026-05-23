@@ -1114,8 +1114,8 @@ body {
   flex-direction: column;
   gap: 0;
   padding: 0;
-  overflow: hidden;
-  height: calc(100vh - 120px);
+  overflow: visible;
+  flex: 1;
 }
 
 #code-entry-view {
@@ -1128,22 +1128,22 @@ body {
 }
 
 .live-map {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 100%;
+  position: relative;
+  width: 100%;
+  min-height: 300px;
   z-index: 1;
   background: #e8eaf0;
 }
 
 #map-view {
   position: relative;
-  flex: 1;
-  height: 100%;
-  min-height: 0;
+  width: 100%;
+  min-height: 300px;
+  z-index: 5;
+  background: #e8eaf0;
   overflow: hidden;
 }
+
 
 /* Bottom sheet over map */
 .map-sheet {

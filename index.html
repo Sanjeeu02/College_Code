@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
-    <link rel="stylesheet" href="style.css?v=19" />
+    <link rel="stylesheet" href="style.css?v=23" />
     
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -100,21 +100,21 @@
                     <div class="fields-v4">
                         <div id="reg-fields" class="hidden">
                             <div class="field-group-v4">
-                                <label>Full Name</label>
+                                <label for="auth-user">Full Name</label>
                                 <input type="text" id="auth-user" placeholder="Enter your name" />
                             </div>
                         </div>
                         <div class="field-group-v4">
-                            <label>Email</label>
+                            <label for="auth-email">Email</label>
                             <input type="email" id="auth-email" placeholder="email@example.com" />
                         </div>
                         <div class="field-group-v4">
-                            <label>Password</label>
+                            <label for="auth-pass">Password</label>
                             <input type="password" id="auth-pass" placeholder="••••••••" />
                         </div>
                         <div id="confirm-pass-wrap" class="hidden">
                             <div class="field-group-v4">
-                                <label>Confirm Password</label>
+                                <label for="auth-pass-confirm">Confirm Password</label>
                                 <input type="password" id="auth-pass-confirm" placeholder="••••••••" />
                             </div>
                         </div>
@@ -158,7 +158,7 @@
             <p class="role-sub" style="margin-bottom: 24px;">Enter the secure code provided by your college administration.</p>
             
             <div class="field-group-v4" style="text-align: left;">
-                <label>College Code</label>
+                <label for="college-code-input">College Code</label>
                 <input type="text" id="college-code-input" placeholder="e.g. SRM123" oninput="this.value=this.value.toUpperCase().replace(/\s/g, '')" />
             </div>
             
@@ -757,7 +757,7 @@
     <div id="offline-badge" class="offline-badge">⚡ Offline - Waiting for network</div>
 
     <!-- Scripts -->
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=22"></script>
 </body>
 
 </html>

@@ -295,7 +295,7 @@ function connectFb(cfg) {
         S.user = user;
         showToast('🌐 Google Sign-in successful!');
         
-        let role = await getRoleByUid(user.uid);
+        let role = await getRoleByUid(user.uid); // also restores S.collegeCode from Firestore
         if (!role) {
           role = localStorage.getItem('ba_pending_role') || 'student';
           const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
@@ -307,6 +307,7 @@ function connectFb(cfg) {
         
         S.role = role;
         localStorage.setItem('ba_cached_role', S.role);
+        if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
         localStorage.removeItem('ba_pending_role');
         handleAuthSuccess(user);
       }
@@ -328,15 +329,17 @@ function connectFb(cfg) {
         if (user) {
           S.user = user;
           
-          // 1. Try Cache
+          // 1. Try Cache — restore both role AND college code instantly
           const cachedRole = localStorage.getItem('ba_cached_role');
+          const cachedCollegeCode = localStorage.getItem('ba_college_code');
           if (cachedRole) {
             S.role = cachedRole;
+            if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
             handleAuthSuccess(user);
             return;
           }
 
-          // 2. Try DB
+          // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
           S.role = await getRoleByUid(user.uid);
           
           // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
@@ -361,12 +364,15 @@ function connectFb(cfg) {
           }
         } else {
           localStorage.removeItem('ba_cached_role');
+          localStorage.removeItem('ba_college_code');
           showRoleScreen();
         }
       }, 800); // Slightly longer delay to ensure Firestore is ready
     });
 
-    startBusListener();
+    // NOTE: startBusListener() is called in handleAuthSuccess() AFTER
+    // S.collegeCode is known. Calling it here would silently listen to
+    // 'colleges/null/buses' (before auth completes) and load no data.
 
     // Monitor connection state — show status if we drop
     S.db.ref('.info/connected').on('value', snap => {
@@ -616,57 +622,90 @@ function _doStartTracking(busId) {
   setStatus('Tracking Bus', true);
   showToast(`📡 Tracking: ${bus.busNumber || busId}`);
 
-  showMapView();
-
   q('#map-bus-num').textContent = 'Bus ' + (bus.busNumber || '--');
   q('#map-bus-route').textContent = bus.route || '--';
 
-  // Destroy old map completely so we get a fresh one
+  // Destroy old map instance so initMap() creates a fresh one
   if (S.map) {
     try { S.map.remove(); } catch (e) { }
     S.map = null; S.busMarker = null; S.stopMarker = null; S.stopCircle = null;
+    if (S.routeControl) { S.routeControl = null; }
   }
 
-  setTimeout(() => {
-    initMap();
-    // Immediately show bus if location exists
-    if (bus.location && bus.location.lat && bus.location.lon) {
-      moveBusOnMap(bus.location.lat, bus.location.lon);
-      updateTrackInfo(bus.location);
-    }
-    if (S.stopLoc) drawStopMarker(S.stopLoc.lat, S.stopLoc.lon);
+  // Show the map view FIRST so the container is in the DOM and visible
+  showMapView();
 
-    // Start polling as backup (Firebase listener may lag)
-    startBusPoller(busId);
+  // Use double requestAnimationFrame to guarantee the browser has painted
+  // the visible #map-view before Leaflet measures anything
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      initMap();
 
-    // Fetch live weather data to augment AI decisions dynamically
-    if (typeof WeatherEngine !== 'undefined' && S.stopLoc) {
-      WeatherEngine.fetchLiveWeather(S.stopLoc.lat, S.stopLoc.lon);
-    }
-  }, 200);
-}
+      // Immediately place bus marker if location exists
+      if (bus.location && bus.location.lat && bus.location.lon) {
+        moveBusOnMap(bus.location.lat, bus.location.lon);
+        updateTrackInfo(bus.location);
+      }
+      if (S.stopLoc) drawStopMarker(S.stopLoc.lat, S.stopLoc.lon);
 
-// Poll Firebase rapidly for the highest possible ultra-low latency real-time tracking
-function startBusPoller(busId) {
-  stopBusPoller();
-  _busPoller = setInterval(() => {
-    if (!S.trackOn || !S.trackedId || !S.db) { stopBusPoller(); return; }
-    S.db.ref(`colleges/${S.collegeCode}/buses/${S.trackedId}/location`).once('value', snap => {
-      const loc = snap.val();
-      if (loc && loc.lat && loc.lon) {
-        // Update allBuses cache
-        if (S.allBuses[S.trackedId]) {
-          S.allBuses[S.trackedId].location = loc;
-        }
-        moveBusOnMap(loc.lat, loc.lon);
-        updateTrackInfo(loc);
+      // Start high-frequency polling as backup for the Firebase listener
+      startBusPoller(busId);
+
+      // Fetch live weather data to augment AI decisions dynamically
+      if (typeof WeatherEngine !== 'undefined' && S.stopLoc) {
+        WeatherEngine.fetchLiveWeather(S.stopLoc.lat, S.stopLoc.lon);
       }
     });
-  }, 500);  // High-frequency 500ms WebSockets!
+  });
+}
+
+let _studentGpsTimeout = null;
+
+// Replace polling with True Real-time Firebase Listener
+function startBusPoller(busId) {
+  stopBusPoller();
+  if (!S.db) return;
+  
+  const busRef = S.db.ref(`colleges/${S.collegeCode}/buses/${busId}/location`);
+  
+  // Real-time listener for ultra-low latency updates
+  busRef.on('value', snap => {
+    if (!S.trackOn || S.trackedId !== busId) { stopBusPoller(); return; }
+    
+    // Clear the timeout that shows "Signal Lost"
+    if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
+    q('#map-status-hint').textContent = '📡 Live Tracking';
+    q('#map-status-hint').style.color = 'var(--green)';
+
+    const loc = snap.val();
+    if (loc && loc.lat && loc.lon) {
+      if (S.allBuses[busId]) S.allBuses[busId].location = loc;
+      moveBusOnMap(loc.lat, loc.lon);
+      updateTrackInfo(loc);
+    }
+
+    // Set a fallback timeout if driver loses signal
+    _studentGpsTimeout = setTimeout(() => {
+      if (S.trackOn) {
+        q('#map-status-hint').textContent = '⚠️ GPS Signal Lost - Showing Last Known Location';
+        q('#map-status-hint').style.color = '#f59e0b';
+      }
+    }, 15000); // 15 seconds without an update
+  });
+  
+  // Store the ref so we can turn off the listener later
+  S._activeBusRef = busRef;
 }
 
 function stopBusPoller() {
-  if (_busPoller) { clearInterval(_busPoller); _busPoller = null; }
+  if (S._activeBusRef) {
+    S._activeBusRef.off('value');
+    S._activeBusRef = null;
+  }
+  if (_studentGpsTimeout) {
+    clearTimeout(_studentGpsTimeout);
+    _studentGpsTimeout = null;
+  }
 }
 
 // Refresh button handler
@@ -714,18 +753,118 @@ function stopTrackingInner(silent) {
 }
 
 // ─── MAP ─────────────────────────────────────────────────────────
+
+/**
+ * Compute the available pixel height for the map, based on actual
+ * DOM measurements of the header and tab bar. Falls back to
+ * sensible defaults so the map always gets a non-zero height.
+ */
+function _getMapHeight() {
+  const topbarEl = document.querySelector('.topbar');
+  const tabsEl   = document.querySelector('.tabs');
+
+  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
+
+  let tabsH = 88; // fallback
+  if (tabsEl) {
+    const r = tabsEl.getBoundingClientRect();
+    const style = getComputedStyle(tabsEl);
+    tabsH = r.height
+      + (parseFloat(style.marginTop)    || 0)
+      + (parseFloat(style.marginBottom) || 0);
+  }
+
+  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+}
+
+/**
+ * Compute the available pixel height for the map, based on actual
+ * DOM measurements of the header and tab bar. Falls back to
+ * sensible defaults so the map always gets a non-zero height.
+ */
+function _getMapHeight() {
+  const topbarEl = document.querySelector('.topbar');
+  const tabsEl   = document.querySelector('.tabs');
+
+  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
+
+  let tabsH = 88; // fallback
+  if (tabsEl) {
+    const r = tabsEl.getBoundingClientRect();
+    const style = getComputedStyle(tabsEl);
+    tabsH = r.height
+      + (parseFloat(style.marginTop)    || 0)
+      + (parseFloat(style.marginBottom) || 0);
+  }
+
+  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+}
+
+// Smoothly animate marker between coordinates
+function animateMarker(marker, endLat, endLon, duration = 800) {
+  if (!marker) return;
+  const start = marker.getLatLng();
+  if (start.lat === endLat && start.lng === endLon) return;
+
+  const startTime = performance.now();
+  
+  function step(timestamp) {
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Ease out quad
+    const ease = progress * (2 - progress);
+    
+    const curLat = start.lat + (endLat - start.lat) * ease;
+    const curLng = start.lng + (endLon - start.lng) * ease;
+    
+    marker.setLatLng([curLat, curLng]);
+    
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function moveBusOnMap(lat, lon) {
+  if (!S.map) return;
+  const ic = L.divIcon({ className: 'custom-div-icon', html: '<div class="map-bus-icon">🚌</div>', iconSize: [40, 40], iconAnchor: [20, 20] });
+  if (!S.busMarker) {
+    S.busMarker = L.marker([lat, lon], { icon: ic }).addTo(S.map);
+    S.map.setView([lat, lon], 16, { animate: true });
+  } else {
+    // Use smooth interpolation instead of jumping
+    animateMarker(S.busMarker, lat, lon);
+  }
+  drawRouteToStop(lat, lon);
+}
+
 function initMap() {
   if (S.map) return;
-  const mapEl = document.getElementById('live-map');
-  if (!mapEl) { console.error('Map element not found'); return; }
+  const mapEl   = document.getElementById('live-map');
+  const mapView = document.getElementById('map-view');
+  if (!mapEl) { console.error('initMap: #live-map not found'); return; }
 
-  S.map = L.map('live-map', { zoomControl: true, attributionControl: false }).setView([12.9716, 77.5946], 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(S.map);
+  // ── Force explicit pixel height — never trust the CSS flex chain ──
+  const mapH = _getMapHeight();
+  if (mapView) {
+    mapView.style.height   = mapH + 'px';
+    mapView.style.minHeight = '300px';
+  }
+  mapEl.style.width     = '100%';
+  mapEl.style.height    = mapH + 'px';
+  mapEl.style.minHeight = '300px';
 
-  // Multiple invalidateSize calls to handle delayed rendering
-  setTimeout(() => S.map && S.map.invalidateSize(), 200);
-  setTimeout(() => S.map && S.map.invalidateSize(), 500);
-  setTimeout(() => S.map && S.map.invalidateSize(), 1000);
+  S.map = L.map('live-map', { zoomControl: true, attributionControl: false })
+           .setView([12.9716, 77.5946], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 })
+   .addTo(S.map);
+
+  // Staggered invalidateSize to handle any residual CSS reflow
+  [50, 150, 400, 800, 1500].forEach(ms =>
+    setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
+  );
 }
 
 function busIcon() {
@@ -845,10 +984,32 @@ function updateRoutePolyline() {
 
 // ─── SHOW/HIDE VIEWS ─────────────────────────────────────────────
 function showMapView() {
-  q('#code-entry-view').classList.add('hidden');
-  q('#map-view').classList.remove('hidden');
-  setTimeout(() => { if (S.map) S.map.invalidateSize(); }, 200);
+  const codeEntry = q('#code-entry-view');
+  const mapView   = q('#map-view');
+
+  if (codeEntry) codeEntry.classList.add('hidden');
+  if (!mapView)  return;
+
+  mapView.classList.remove('hidden');
+
+  // Pre-size the map view so Leaflet always gets a non-zero container
+  const mapH = _getMapHeight();
+  mapView.style.height    = mapH + 'px';
+  mapView.style.minHeight = '300px';
+
+  const mapEl = q('#live-map');
+  if (mapEl) {
+    mapEl.style.width     = '100%';
+    mapEl.style.height    = mapH + 'px';
+    mapEl.style.minHeight = '300px';
+  }
+
+  // invalidateSize fires AFTER initMap() has been called (map might not exist yet here)
+  [400, 800, 1400].forEach(ms =>
+    setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
+  );
 }
+
 
 function showCodeEntryView() {
   q('#map-view').classList.add('hidden');
@@ -1266,6 +1427,7 @@ function startDriver(resuming = false) {
     createdBy: createdBy || 'admin'
   });
 
+  requestWakeLock();
   startRobustDriverWatch();
   listenDriverAlerts();
 }
@@ -1406,6 +1568,7 @@ function pushSimulatedLocation(mph) {
 function stopDriver() {
   S.driverOn = false;
   stopAiSimulationLoop();
+  releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
   if (S.db && S.driverBusId) {
@@ -1433,9 +1596,26 @@ function stopDriver() {
 }
 
 let _lastMoved, _lastLat, _lastLon;
+let _offlineGpsQueue = JSON.parse(localStorage.getItem('ba_offline_gps') || '[]');
+
+// Auto-sync offline cache when connection restores
+window.addEventListener('online', () => {
+  if (_offlineGpsQueue.length > 0 && S.driverOn && S.driverBusId) {
+    showToast(`🔄 Syncing offline GPS data...`);
+    const lastPoint = _offlineGpsQueue[_offlineGpsQueue.length - 1];
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(lastPoint);
+    _offlineGpsQueue = [];
+    localStorage.setItem('ba_offline_gps', '[]');
+  }
+});
+
 function onDriverPos(pos) {
   if (!S.driverOn) return;
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+  
+  // Validation: prevent null or 0,0 island coordinates
+  if (!lat || !lon || (lat === 0 && lon === 0)) return;
+  
   const now = Date.now();
 
   // Auto-Stop check (Parked for > 20 mins)
@@ -1451,14 +1631,29 @@ function onDriverPos(pos) {
   q('#dlc-accuracy').textContent = Math.round(accuracy);
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-  // Use update instead of just setting location node, so onDisconnect doesn't ruin the object if it reconnects
-  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
+  
+  const payload = {
     active: true,
     'location/lat': lat,
     'location/lon': lon,
     'location/accuracy': accuracy,
     'location/timestamp': now
-  });
+  };
+
+  if (navigator.onLine) {
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(payload).catch(e => {
+      // Offline fallback if Firebase fails
+      _offlineGpsQueue.push(payload);
+      if (_offlineGpsQueue.length > 50) _offlineGpsQueue.shift();
+      localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
+    });
+  } else {
+    // True offline caching
+    _offlineGpsQueue.push(payload);
+    if (_offlineGpsQueue.length > 50) _offlineGpsQueue.shift();
+    localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
+    showToast('⚠️ Offline - Caching GPS...');
+  }
 }
 
 // ─── MISS-STOP ALERT (Student → Driver) ─────────────────────────
@@ -1590,8 +1785,7 @@ function getPos(ok, fail) {
 
 function watchPos(ok, fail) {
   if (!navigator.geolocation) return null;
-  // We use a shorter timeout for watchPosition to detect failures early, 
-  // but we'll let the system keep trying unless it's a permanent error.
+  // Use strictly zero maximumAge and enforce high accuracy for live tracking
   return navigator.geolocation.watchPosition(
     ok,
     e => {
@@ -1600,9 +1794,34 @@ function watchPos(ok, fail) {
         fail(e.message || 'GPS error');
       }
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
   );
 }
+
+// ─── WAKE LOCK API (Keep screen on for driver) ───────────────────
+let wakeLock = null;
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('Wake Lock is active');
+    } catch (err) {
+      console.warn(`Wake Lock error: ${err.name}, ${err.message}`);
+    }
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock !== null) {
+    wakeLock.release().then(() => { wakeLock = null; });
+  }
+}
+
+// Handle visibility change to re-request wake lock if needed
+document.addEventListener('visibilitychange', async () => {
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    requestWakeLock();
+  }
+});
 
 function getDistance(la1, lo1, la2, lo2) {
   const R = 6371, dL = toR(la2 - la1), dO = toR(lo2 - lo1);
@@ -1914,11 +2133,26 @@ async function fetchAIInsight() {
 // ─── ROLE & AUTH LOGIC ──────────────────────────────────────────
 async function getRoleByUid(uid) {
   let doc = await S.studentDb.collection('students').doc(uid).get();
-  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'student'; }
+  if (doc.exists) {
+    const code = doc.data().collegeCode || null;
+    S.collegeCode = code;
+    if (code) localStorage.setItem('ba_college_code', code);
+    return 'student';
+  }
   doc = await S.driverDb.collection('drivers').doc(uid).get();
-  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'driver'; }
+  if (doc.exists) {
+    const code = doc.data().collegeCode || null;
+    S.collegeCode = code;
+    if (code) localStorage.setItem('ba_college_code', code);
+    return 'driver';
+  }
   doc = await S.adminDb.collection('admins').doc(uid).get();
-  if (doc.exists) { S.collegeCode = doc.data().collegeCode || null; return 'admin'; }
+  if (doc.exists) {
+    const code = doc.data().collegeCode || null;
+    S.collegeCode = code;
+    if (code) localStorage.setItem('ba_college_code', code);
+    return 'admin';
+  }
   return null;
 }
 
@@ -2018,18 +2252,21 @@ async function handleAuthSubmit() {
       user = res.user;
       // ⚡ Check localStorage cache first — skip DB round-trip
       const cachedRole = localStorage.getItem('ba_cached_role');
+      const cachedCode  = localStorage.getItem('ba_college_code');
       if (cachedRole) {
         S.user = user;
         S.role = cachedRole;
+        if (cachedCode) S.collegeCode = cachedCode;
       } else {
-        // First time on this device — fetch from DB once
+        // First time on this device — fetch from DB once (also restores collegeCode)
         S.role = await getRoleByUid(user.uid);
         S.user = user;
       }
       if (!S.role) { err.textContent = '⚠️ No role found. Please register first.'; return; }
     }
-    // Cache role for instant future logins
+    // Cache role + college code for instant future logins
     localStorage.setItem('ba_cached_role', S.role);
+    if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
     handleAuthSuccess(user);
   } catch (e) {
     err.textContent = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
@@ -2060,9 +2297,12 @@ async function loginWithGoogle() {
       S.user = user;
 
       const cachedRole = localStorage.getItem('ba_cached_role');
+      const cachedCode  = localStorage.getItem('ba_college_code');
       if (cachedRole) {
         S.role = cachedRole;
+        if (cachedCode) S.collegeCode = cachedCode;
       } else {
+        // First time on this device — also fetches + caches collegeCode from Firestore
         const foundRole = await getRoleByUid(user.uid);
         if (foundRole) {
           S.role = foundRole;
@@ -2076,6 +2316,7 @@ async function loginWithGoogle() {
         }
       }
       localStorage.setItem('ba_cached_role', S.role);
+      if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
       handleAuthSuccess(user);
     }
   } catch (e) {
@@ -2093,64 +2334,85 @@ async function loginWithGoogle() {
 function handleAuthSuccess(user) {
   q('#role-screen').classList.add('hidden');
   q('#auth-screen').classList.add('hidden');
-  
-  if (S.role !== 'admin' && !S.collegeCode) {
-    q('#college-code-screen').classList.remove('hidden');
-    return;
-  }
-  
+  q('#college-code-screen').classList.add('hidden');
+
   // Admin users are redirected to the full admin portal
   if (S.role === 'admin') {
     window.location.href = 'admin.html';
     return;
   }
 
+  // Check if student/driver still needs college code verification.
+  // Prefer the in-memory value set by getRoleByUid (from Firestore),
+  // then fall back to the localStorage cache, and only show the
+  // college-code screen when neither source has a verified code.
+  if (S.role !== 'admin') {
+    const cachedCode = localStorage.getItem('ba_college_code');
+    if (!S.collegeCode && cachedCode) {
+      // Restore from cache — no need to show the screen
+      S.collegeCode = cachedCode;
+    }
+    if (!S.collegeCode) {
+      // No verified code found — show the verification screen
+      q('#college-code-screen').classList.remove('hidden');
+      return;
+    }
+  }
+
+  // Restart the bus listener with the correct college path
+  if (S.db && S.collegeCode) {
+    S.db.ref('colleges/' + S.collegeCode + '/buses').off();
+    startBusListener();
+  }
+
   // Students and Drivers get the main app
-  q('#college-code-screen').classList.add('hidden');
   q('#app').classList.remove('hidden');
   updateUIByRole();
   renderProfileInfo();
-  showToast(`👋 Welcome, ${user.displayName || 'User'}!`);
+  showToast(`👋 Welcome back, ${user.displayName || 'User'}!`);
 }
 
 async function verifyCollegeCode() {
   const code = q('#college-code-input').value.trim().toUpperCase();
   const err = q('#cc-error');
+  const btn = q('#college-code-screen .submit-btn-v4');
   if (!code) { err.textContent = '⚠️ Please enter a college code.'; err.classList.remove('hidden'); return; }
   
   err.textContent = '⏳ Verifying code...';
   err.classList.remove('hidden');
   err.style.color = 'var(--text)';
+  if (btn) btn.disabled = true;
   
   try {
     const doc = await S.studentDb.collection('colleges').doc(code).get();
     if (!doc.exists) {
       err.textContent = '❌ Invalid College Code. Please check with your admin.';
       err.style.color = 'var(--red)';
+      if (btn) btn.disabled = false;
       return;
     }
     
-    // Save to user profile
+    // ── Persist in Firestore profile (source of truth) ──
     if (S.role === 'student') await S.studentDb.collection('students').doc(S.user.uid).update({ collegeCode: code });
     else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(S.user.uid).update({ collegeCode: code });
     
+    // ── Cache locally so we never show this screen again ──
     S.collegeCode = code;
-    err.textContent = '✅ Verified! Logging in...';
+    localStorage.setItem('ba_college_code', code);
+    
+    err.textContent = '✅ College verified! Redirecting...';
     err.style.color = 'var(--green)';
     
     setTimeout(() => {
-      // Re-initialize listener with isolated path
-      if (S.db) {
-        S.db.ref('colleges/' + S.collegeCode + '/buses').off(); // turn off old
-        startBusListener(); 
-      }
+      if (btn) btn.disabled = false;
       handleAuthSuccess(S.user);
-    }, 1000);
+    }, 900);
     
   } catch (e) {
     console.error("College Code Error:", e);
     err.textContent = '❌ Error verifying code: ' + e.message;
     err.style.color = 'var(--red)';
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -2172,16 +2434,21 @@ function renderProfileInfo() {
 }
 
 function handleLogout() {
+  // Clear all auth caches — user will start fresh on next visit
   localStorage.removeItem('ba_cached_role');
+  localStorage.removeItem('ba_college_code');
   S.auth.signOut();
   closeProfile();
   location.reload();
 }
 
 function switchRole() {
+  // Clear all auth caches so the role and college selection screens appear
   localStorage.removeItem('ba_cached_role');
+  localStorage.removeItem('ba_college_code');
   S.user = null;
   S.role = null;
+  S.collegeCode = null;
   S.auth.signOut();
   closeProfile();
   location.reload();
