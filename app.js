@@ -17,6 +17,7 @@ const S = {
   trackOn: false, trackedId: null, trackAlerted: false,
   stopLoc: null, allBuses: {},
   alertedBusPos: null,  // lat/lon where the alert fired (for 1km auto-stop)
+  trackedBusActive: null,
 
   // Driver
   driverOn: false, driverWid: null, driverBusId: null, driverUpdates: 0,
@@ -407,12 +408,62 @@ function _handleBusUpdate() {
   // Check if tracked bus went offline
   if (S.trackOn && S.trackedId) {
     const b = S.allBuses[S.trackedId];
-    if (!b || !b.active) {
-      showToast('ℹ️ Driver ended the trip.');
+    const isActive = !!(b && b.active);
+    
+    // Check if the status has changed
+    if (S.trackedBusActive !== isActive) {
+      S.trackedBusActive = isActive;
+      if (!isActive) {
+        showToast('ℹ️ Driver ended the trip.');
+        q('#map-status-hint').textContent = '🔴 Driver is Offline (Trip Ended)';
+        q('#map-status-hint').style.color = 'var(--red)';
+        const badge = q('.live-dot-badge');
+        if (badge) {
+          badge.innerHTML = '🔴 OFFLINE';
+          badge.style.background = 'rgba(107, 114, 128, 0.2)';
+          badge.style.color = '#6b7280';
+          badge.style.borderColor = '#d1d5db';
+        }
+      } else {
+        showToast('🌐 Driver is back online!');
+        q('#map-status-hint').textContent = '📡 Live Tracking';
+        q('#map-status-hint').style.color = 'var(--green)';
+        const badge = q('.live-dot-badge');
+        if (badge) {
+          badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
+          badge.style.background = '';
+          badge.style.color = '';
+          badge.style.borderColor = '';
+        }
+      }
+    } else if (!isActive) {
+      // Keep offline styling if still offline
+      q('#map-status-hint').textContent = '🔴 Driver is Offline (Trip Ended)';
+      q('#map-status-hint').style.color = 'var(--red)';
+      const badge = q('.live-dot-badge');
+      if (badge && !badge.textContent.includes('OFFLINE')) {
+        badge.innerHTML = '🔴 OFFLINE';
+        badge.style.background = 'rgba(107, 114, 128, 0.2)';
+        badge.style.color = '#6b7280';
+        badge.style.borderColor = '#d1d5db';
+      }
     } else if (b.location) {
+      // Standard online logic
       const age = Date.now() - (b.location.timestamp || 0);
       if (age > 5 * 60 * 1000) {
         q('#map-status-hint').textContent = '⚠️ Bus GPS signal lost (5+ min old)';
+        q('#map-status-hint').style.color = '#f59e0b';
+      } else {
+        q('#map-status-hint').textContent = '📡 Live Tracking';
+        q('#map-status-hint').style.color = 'var(--green)';
+      }
+      
+      const badge = q('.live-dot-badge');
+      if (badge && badge.textContent.includes('OFFLINE')) {
+        badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
+        badge.style.background = '';
+        badge.style.color = '';
+        badge.style.borderColor = '';
       }
     }
   }
@@ -430,7 +481,14 @@ function switchTab(tab) {
     q(`#tab-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'find') {
-    if (S.trackOn && !S.map) initMap();
+    // Only initialize map if tracking is active AND map doesn't exist AND map-view is actually visible
+    const mapView = q('#map-view');
+    const isMapViewVisible = mapView && window.getComputedStyle(mapView).display !== 'none' && !mapView.classList.contains('hidden');
+    
+    if (S.trackOn && !S.map && isMapViewVisible) {
+      console.log('🗺️ switchTab: calling initMap because map-view is visible');
+      initMap();
+    }
     if (S.trackOn && S.map) {
       setTimeout(() => S.map.invalidateSize(), 100);
       setTimeout(() => S.map.invalidateSize(), 400);
@@ -614,9 +672,20 @@ function _doStartTracking(busId) {
   if (S.trackOn) stopTrackingInner(true);
 
   S.trackOn = true;
+  BackgroundKeepAlive.start();
   S.trackAlerted = false;
   S.trackedId = busId;
   S.alertedBusPos = null;
+  S.trackedBusActive = true;
+
+  // Reset live badge to default LIVE state
+  const badge = q('.live-dot-badge');
+  if (badge) {
+    badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
+    badge.style.background = '';
+    badge.style.color = '';
+    badge.style.borderColor = '';
+  }
 
   const bus = S.allBuses[busId] || {};
   setStatus('Tracking Bus', true);
@@ -632,13 +701,19 @@ function _doStartTracking(busId) {
     if (S.routeControl) { S.routeControl = null; }
   }
 
-  // Show the map view FIRST so the container is in the DOM and visible
+  // Show the map view FIRST so the container is in the DOM and visible BEFORE switching tabs
   showMapView();
+  console.log('✅ Called showMapView()');
+
+  // CRITICAL: Switch to 'find' tab AFTER showing map (so switchTab's initMap check works properly)
+  switchTab('find');
+  console.log('📋 Switched to find tab');
 
   // Use double requestAnimationFrame to guarantee the browser has painted
   // the visible #map-view before Leaflet measures anything
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      console.log('🎯 Double RAF trigger for initMap');
       initMap();
 
       // Immediately place bus marker if location exists
@@ -744,9 +819,11 @@ function stopTracking() {
 
 function stopTrackingInner(silent) {
   S.trackOn = false;
+  BackgroundKeepAlive.stop();
   S.trackedId = null;
   S.trackAlerted = false;
   S.alertedBusPos = null;
+  S.trackedBusActive = null;
   stopBusPoller();
   if (!silent) setStatus('Idle', false);
   q('#track-alert-banner')?.classList.add('hidden');
@@ -776,93 +853,91 @@ function _getMapHeight() {
 
   return Math.max(window.innerHeight - topbarH - tabsH, 300);
 }
-
-/**
- * Compute the available pixel height for the map, based on actual
- * DOM measurements of the header and tab bar. Falls back to
- * sensible defaults so the map always gets a non-zero height.
- */
-function _getMapHeight() {
-  const topbarEl = document.querySelector('.topbar');
-  const tabsEl   = document.querySelector('.tabs');
-
-  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
-
-  let tabsH = 88; // fallback
-  if (tabsEl) {
-    const r = tabsEl.getBoundingClientRect();
-    const style = getComputedStyle(tabsEl);
-    tabsH = r.height
-      + (parseFloat(style.marginTop)    || 0)
-      + (parseFloat(style.marginBottom) || 0);
-  }
-
-  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+// Helper: load an external script dynamically (returns a Promise)
+function _loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
 }
 
-// Smoothly animate marker between coordinates
-function animateMarker(marker, endLat, endLon, duration = 800) {
-  if (!marker) return;
-  const start = marker.getLatLng();
-  if (start.lat === endLat && start.lng === endLon) return;
+// Ensure Leaflet is available; if not, try to load it dynamically.
+function ensureLeafletLoaded(cb) {
+  if (window.L) { if (cb) cb(); return; }
+  console.warn('Leaflet not present — loading dynamically');
+  _loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
+    .then(() => { console.log('Leaflet loaded dynamically'); if (cb) cb(); })
+    .catch(err => { console.error('Leaflet load failed', err); showToast('❌ Map library failed to load. Check network.'); });
+}
 
+// Smoothly animate marker between coordinates (from/to form)
+let _animFrame = null;
+function animateMarker(marker, from, to, durationMs = 800) {
+  if (!marker || !from || !to) return;
+  if (from.lat === to.lat && from.lng === to.lng) return;
+  if (_animFrame) cancelAnimationFrame(_animFrame);
   const startTime = performance.now();
-  
-  function step(timestamp) {
-    const elapsed = timestamp - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    
-    // Ease out quad
-    const ease = progress * (2 - progress);
-    
-    const curLat = start.lat + (endLat - start.lat) * ease;
-    const curLng = start.lng + (endLon - start.lng) * ease;
-    
-    marker.setLatLng([curLat, curLng]);
-    
-    if (progress < 1) {
-      requestAnimationFrame(step);
-    }
+  function frame(now) {
+    const t = Math.min((now - startTime) / durationMs, 1);
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    const lat = from.lat + (to.lat - from.lat) * ease;
+    const lng = from.lng + (to.lng - from.lng) * ease;
+    marker.setLatLng([lat, lng]);
+    if (t < 1) _animFrame = requestAnimationFrame(frame);
+    else { marker.setLatLng(to); _animFrame = null; }
   }
-  requestAnimationFrame(step);
-}
-
-function moveBusOnMap(lat, lon) {
-  if (!S.map) return;
-  const ic = L.divIcon({ className: 'custom-div-icon', html: '<div class="map-bus-icon">🚌</div>', iconSize: [40, 40], iconAnchor: [20, 20] });
-  if (!S.busMarker) {
-    S.busMarker = L.marker([lat, lon], { icon: ic }).addTo(S.map);
-    S.map.setView([lat, lon], 16, { animate: true });
-  } else {
-    // Use smooth interpolation instead of jumping
-    animateMarker(S.busMarker, lat, lon);
-  }
-  drawRouteToStop(lat, lon);
+  _animFrame = requestAnimationFrame(frame);
 }
 
 function initMap() {
-  if (S.map) return;
+  if (S.map) {
+    console.warn('ℹ️ Map already initialized, skipping');
+    return;
+  }
+  // If Leaflet library hasn't loaded for any reason, try to load it
+  if (typeof L === 'undefined') {
+    ensureLeafletLoaded(() => { initMap(); });
+    return;
+  }
+  
   const mapEl   = document.getElementById('live-map');
   const mapView = document.getElementById('map-view');
-  if (!mapEl) { console.error('initMap: #live-map not found'); return; }
 
-  // ── Force explicit pixel height — never trust the CSS flex chain ──
-  const mapH = _getMapHeight();
-  if (mapView) {
-    mapView.style.height   = mapH + 'px';
-    mapView.style.minHeight = '300px';
+  if (!mapEl) { console.error('❌ FATAL: #live-map not found!'); return; }
+
+  // Clear any stale inline overrides that could fight the CSS flex chain
+  mapView && (mapView.style.cssText = '');
+  mapEl.style.cssText = '';
+
+  // Force a reflow so the browser can measure the flex-sized container
+  void mapEl.offsetHeight;
+
+  // Fallback: if CSS flex chain gave us 0 height, set a minimum
+  if (mapEl.clientHeight < 50) {
+    const mapH = _getMapHeight();
+    if (mapView) { mapView.style.height = mapH + 'px'; }
+    mapEl.style.height = mapH + 'px';
+    mapEl.style.minHeight = '300px';
+    void mapEl.offsetHeight;
   }
-  mapEl.style.width     = '100%';
-  mapEl.style.height    = mapH + 'px';
-  mapEl.style.minHeight = '300px';
 
-  S.map = L.map('live-map', { zoomControl: true, attributionControl: false })
-           .setView([12.9716, 77.5946], 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 })
-   .addTo(S.map);
+  try {
+    S.map = L.map('live-map', { zoomControl: true, attributionControl: false })
+             .setView([12.9716, 77.5946], 13);
 
-  // Staggered invalidateSize to handle any residual CSS reflow
-  [50, 150, 400, 800, 1500].forEach(ms =>
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 })
+     .addTo(S.map);
+  } catch (err) {
+    console.error('❌ Failed to initialize Leaflet map:', err);
+    return;
+  }
+
+  // Staggered invalidateSize — guards against layout thrashing and late reflows
+  [50, 200, 500, 1000, 2000].forEach(ms =>
     setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
   );
 }
@@ -915,22 +990,6 @@ function moveBusOnMap(lat, lon) {
 
   updateRoutePolyline();
 }
-
-let _animFrame = null;
-function animateMarker(marker, from, to, durationMs) {
-  if (_animFrame) cancelAnimationFrame(_animFrame);
-  const startTime = performance.now();
-  function frame(now) {
-    const t = Math.min((now - startTime) / durationMs, 1);
-    const lat = from.lat + (to.lat - from.lat) * easeInOut(t);
-    const lon = from.lng + (to.lng - from.lng) * easeInOut(t);
-    marker.setLatLng([lat, lon]);
-    if (t < 1) _animFrame = requestAnimationFrame(frame);
-    else { marker.setLatLng(to); _animFrame = null; }
-  }
-  _animFrame = requestAnimationFrame(frame);
-}
-function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
 
 function drawStopMarker(lat, lon) {
   if (!S.map) return;
@@ -986,26 +1045,38 @@ function updateRoutePolyline() {
 function showMapView() {
   const codeEntry = q('#code-entry-view');
   const mapView   = q('#map-view');
+  const panelFind = q('#panel-find');
 
+  // Hide the search/code-entry view
   if (codeEntry) codeEntry.classList.add('hidden');
-  if (!mapView)  return;
 
+  if (!mapView) { console.error('❌ #map-view not found!'); return; }
+
+  // -- Step 1: Ensure #panel-find is visible and the active tab panel --
+  if (panelFind) {
+    panelFind.classList.remove('hidden');
+    panelFind.classList.add('active');
+    // Remove inline style overrides that fight the CSS flex chain
+    panelFind.style.cssText = '';
+  }
+
+  // -- Step 2: Show the map view, let CSS flex do the sizing --
   mapView.classList.remove('hidden');
-
-  // Pre-size the map view so Leaflet always gets a non-zero container
-  const mapH = _getMapHeight();
-  mapView.style.height    = mapH + 'px';
-  mapView.style.minHeight = '300px';
+  // Remove any stale inline styles so CSS takes over
+  mapView.style.cssText = '';
 
   const mapEl = q('#live-map');
   if (mapEl) {
-    mapEl.style.width     = '100%';
-    mapEl.style.height    = mapH + 'px';
-    mapEl.style.minHeight = '300px';
+    // Clear stale inline overrides; CSS flex:1 will size it
+    mapEl.style.cssText = '';
   }
 
-  // invalidateSize fires AFTER initMap() has been called (map might not exist yet here)
-  [400, 800, 1400].forEach(ms =>
+  // -- Step 3: Force a reflow so the browser lays out BEFORE Leaflet measures --
+  void mapView.offsetHeight;
+
+  // -- Step 4: Tell Leaflet to recalculate its size multiple times --
+  // (handles both fast and slow reflow situations)
+  [100, 300, 600, 1200].forEach(ms =>
     setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
   );
 }
@@ -1213,6 +1284,7 @@ function toggleSleepMode() {
 function startSleep() {
   if (!S.home) { showToast('⚠️ Set home location first!'); return; }
   S.sleepOn = true; S.sleptAlert = false;
+  BackgroundKeepAlive.start();
   q('#btn-sleep').classList.add('stop-mode');
   q('#sleep-btn-label').innerHTML = '⏹ &nbsp;Stop Sleep Mode';
   q('#sleep-meter').classList.remove('hidden');
@@ -1255,6 +1327,7 @@ function startRobustSleepWatch() {
 
 function stopSleep() {
   S.sleepOn = false;
+  BackgroundKeepAlive.stop();
   clearTimeout(S.geoWatchTimer);
   if (S.sleepWid !== null) { navigator.geolocation.clearWatch(S.sleepWid); S.sleepWid = null; }
   releaseWakeLock();
@@ -1392,6 +1465,7 @@ function startDriver(resuming = false) {
   S.driverUpdates = 0;
 
   S.driverOn = true;
+  BackgroundKeepAlive.start();
   q('#driver-login-view').classList.add('hidden');
   q('#driver-live-card').classList.remove('hidden');
   q('#dlc-busnum').textContent = 'Bus ' + num;
@@ -1567,6 +1641,7 @@ function pushSimulatedLocation(mph) {
 
 function stopDriver() {
   S.driverOn = false;
+  BackgroundKeepAlive.stop();
   stopAiSimulationLoop();
   releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
@@ -1816,12 +1891,68 @@ function releaseWakeLock() {
   }
 }
 
-// Handle visibility change to re-request wake lock if needed
+// Handle visibility change to re-request wake lock and restart robust watches
 document.addEventListener('visibilitychange', async () => {
-  if (wakeLock !== null && document.visibilityState === 'visible') {
-    requestWakeLock();
+  if (document.visibilityState === 'visible') {
+    if (S.driverOn) startRobustDriverWatch();
+    if (S.sleepOn) startRobustSleepWatch();
+    if (wakeLock !== null) requestWakeLock();
+    if (_wl !== null) reqWakeLock();
   }
 });
+
+// ─── BACKGROUND KEEP-ALIVE ───────────────────────────────────────
+const BackgroundKeepAlive = {
+  audioEl: null,
+  active: false,
+
+  start() {
+    if (this.active) return;
+    this.active = true;
+    console.log('🔄 BackgroundKeepAlive starting...');
+
+    // Method 1: HTML5 Audio Loop (Silent WAV)
+    try {
+      if (!this.audioEl) {
+        this.audioEl = new Audio("data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==");
+        this.audioEl.loop = true;
+      }
+      this.audioEl.play().then(() => {
+        console.log('🔊 Looping silent audio playing (Background Keep-Alive Active)');
+      }).catch(err => {
+        console.warn('Silent audio play failed:', err);
+      });
+    } catch (e) {
+      console.warn('HTML5 Audio keep-alive error:', e);
+    }
+
+    // Register visibility change listener to keep it playing if paused by OS
+    this._onVisibilityChange = () => {
+      if (this.active && this.audioEl && this.audioEl.paused) {
+        this.audioEl.play().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+  },
+
+  stop() {
+    if (!this.active) return;
+    this.active = false;
+    console.log('🔄 BackgroundKeepAlive stopping...');
+
+    try {
+      if (this.audioEl) {
+        this.audioEl.pause();
+        this.audioEl.currentTime = 0;
+      }
+    } catch (e) { }
+
+    if (this._onVisibilityChange) {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange);
+      this._onVisibilityChange = null;
+    }
+  }
+};
 
 function getDistance(la1, lo1, la2, lo2) {
   const R = 6371, dL = toR(la2 - la1), dO = toR(lo2 - lo1);

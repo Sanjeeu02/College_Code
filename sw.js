@@ -3,33 +3,62 @@
    Enables: App install + Offline support + iOS notifications
    ============================================= */
 
-const CACHE = 'busAlert-v27';
+const CACHE = 'busAlert-v34';
 const FILES = [
     '/',
     '/index.html',
-    '/admin',
-    '/admin.html',
-    '/style.css',
-    '/app.js',
+    '/style.css?v=26',
+    '/app.js?v=28',
     '/manifest.json',
     'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap',
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
     'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
 ];
 
-// Install — cache all core files
+// Install — cache all core files resiliently
 self.addEventListener('install', e => {
     e.waitUntil(
-        caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting())
+        (async () => {
+            // Skip caching if running on file:// protocol (dev mode)
+            if (self.location.protocol === 'file:') {
+                console.log('📄 Running on file:// protocol - skipping service worker cache');
+                return self.skipWaiting();
+            }
+
+            try {
+                const cache = await caches.open(CACHE);
+                const cachePromises = FILES.map(asset => {
+                    return cache.add(asset).catch(err => {
+                        console.warn(`Failed to cache asset: ${asset}`, err);
+                    });
+                });
+                await Promise.all(cachePromises);
+                await self.skipWaiting();
+            } catch (err) {
+                console.warn('Cache initialization failed:', err);
+                await self.skipWaiting();
+            }
+        })()
     );
 });
 
 // Activate — clean old caches
 self.addEventListener('activate', e => {
     e.waitUntil(
-        caches.keys().then(keys =>
-            Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-        ).then(() => self.clients.claim())
+        (async () => {
+            // Skip cleanup if running on file:// protocol
+            if (self.location.protocol === 'file:') {
+                return self.clients.claim();
+            }
+
+            try {
+                const keys = await caches.keys();
+                await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
+            } catch (err) {
+                console.warn('Cache cleanup failed:', err);
+            }
+            return self.clients.claim();
+        })()
     );
 });
 
@@ -38,7 +67,7 @@ self.addEventListener('fetch', e => {
     if (e.request.method !== 'GET') return;
     const url = e.request.url;
 
-    // Ignore non-HTTP(s) schemes (e.g. chrome-extension://)
+    // Skip Service Worker operations on file:// protocol
     if (!url.startsWith('http')) return;
 
     // Ignore external APIs and maps
@@ -54,23 +83,40 @@ self.addEventListener('fetch', e => {
                 try {
                     const res = await fetch(e.request);
                     if (res && res.ok && (res.type === 'basic' || res.type === 'cors')) {
-                        const cache = await caches.open(CACHE);
-                        cache.put(e.request, res.clone()).catch(() => { });
+                        try {
+                            const cache = await caches.open(CACHE);
+                            cache.put(e.request, res.clone()).catch(() => { });
+                        } catch (cacheErr) {
+                            console.debug('Cache update failed:', cacheErr);
+                        }
                     }
                     return res;
                 } catch (err) {
-                    const cached = await caches.match(e.request);
-                    if (cached) return cached;
+                    try {
+                        const cached = await caches.match(e.request);
+                        if (cached) return cached;
+                    } catch (cacheErr) {
+                        console.debug('Cache lookup failed:', cacheErr);
+                    }
                     throw err;
                 }
             } else {
                 // Cache First
-                const cached = await caches.match(e.request);
-                if (cached) return cached;
+                try {
+                    const cached = await caches.match(e.request);
+                    if (cached) return cached;
+                } catch (cacheErr) {
+                    console.debug('Cache lookup failed:', cacheErr);
+                }
+                
                 const res = await fetch(e.request);
                 if (res && res.ok && (res.type === 'basic' || res.type === 'cors')) {
-                    const cache = await caches.open(CACHE);
-                    cache.put(e.request, res.clone()).catch(() => { });
+                    try {
+                        const cache = await caches.open(CACHE);
+                        cache.put(e.request, res.clone()).catch(() => { });
+                    } catch (cacheErr) {
+                        console.debug('Cache update failed:', cacheErr);
+                    }
                 }
                 return res;
             }

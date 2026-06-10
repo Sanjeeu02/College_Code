@@ -18,7 +18,7 @@ const intervalId = setInterval(() => {
         }
     });
 
-    const req = https.request('https://smartbustracker-ef456-default-rtdb.asia-southeast1.firebasedatabase.app/buses/bus_DEMO_99.json', {
+    const req = https.request('https://smartbustracker-ef456-default-rtdb.asia-southeast1.firebasedatabase.app/colleges/DEMO/buses/bus_DEMO_99.json', {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
