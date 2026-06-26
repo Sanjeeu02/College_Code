@@ -396,81 +396,67 @@ function startBusListener() {
 }
 
 function _handleBusUpdate() {
-  // update tracked bus on map
-  if (S.trackOn && S.trackedId && S.allBuses[S.trackedId]?.location) {
-    const loc = S.allBuses[S.trackedId].location;
-    if (loc.lat && loc.lon) {
-      moveBusOnMap(loc.lat, loc.lon);
-      updateTrackInfo(loc);
-    }
-  }
+  // ── NOTE: Map position updates (moveBusOnMap / updateTrackInfo) are handled
+  // exclusively by startBusPoller which listens to the faster /location child
+  // node. Duplicating those calls here (on the parent /buses listener) caused
+  // every GPS tick to fire the update twice. This function now only owns:
+  //   1. The active / offline state-transition badge & hint
+  //   2. Refreshing the bus search list
 
-  // Check if tracked bus went offline
+  // ── Active / Offline state machine ──────────────────────────────
   if (S.trackOn && S.trackedId) {
     const b = S.allBuses[S.trackedId];
     const isActive = !!(b && b.active);
-    
-    // Check if the status has changed
+
     if (S.trackedBusActive !== isActive) {
+      // ── State CHANGED (online ↔ offline) ── fire toast exactly once ──
       S.trackedBusActive = isActive;
+
       if (!isActive) {
+        // Driver went OFFLINE
         showToast('ℹ️ Driver ended the trip.');
-        q('#map-status-hint').textContent = '🔴 Driver is Offline (Trip Ended)';
-        q('#map-status-hint').style.color = 'var(--red)';
-        const badge = q('.live-dot-badge');
-        if (badge) {
-          badge.innerHTML = '🔴 OFFLINE';
-          badge.style.background = 'rgba(107, 114, 128, 0.2)';
-          badge.style.color = '#6b7280';
-          badge.style.borderColor = '#d1d5db';
-        }
+        _applyOfflineBadge();
       } else {
+        // Driver came back ONLINE
         showToast('🌐 Driver is back online!');
-        q('#map-status-hint').textContent = '📡 Live Tracking';
-        q('#map-status-hint').style.color = 'var(--green)';
-        const badge = q('.live-dot-badge');
-        if (badge) {
-          badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
-          badge.style.background = '';
-          badge.style.color = '';
-          badge.style.borderColor = '';
-        }
+        _applyOnlineBadge();
       }
     } else if (!isActive) {
-      // Keep offline styling if still offline
-      q('#map-status-hint').textContent = '🔴 Driver is Offline (Trip Ended)';
-      q('#map-status-hint').style.color = 'var(--red)';
-      const badge = q('.live-dot-badge');
-      if (badge && !badge.textContent.includes('OFFLINE')) {
-        badge.innerHTML = '🔴 OFFLINE';
-        badge.style.background = 'rgba(107, 114, 128, 0.2)';
-        badge.style.color = '#6b7280';
-        badge.style.borderColor = '#d1d5db';
-      }
-    } else if (b.location) {
-      // Standard online logic
-      const age = Date.now() - (b.location.timestamp || 0);
-      if (age > 5 * 60 * 1000) {
-        q('#map-status-hint').textContent = '⚠️ Bus GPS signal lost (5+ min old)';
-        q('#map-status-hint').style.color = '#f59e0b';
-      } else {
-        q('#map-status-hint').textContent = '📡 Live Tracking';
-        q('#map-status-hint').style.color = 'var(--green)';
-      }
-      
-      const badge = q('.live-dot-badge');
-      if (badge && badge.textContent.includes('OFFLINE')) {
-        badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
-        badge.style.background = '';
-        badge.style.color = '';
-        badge.style.borderColor = '';
-      }
+      // Already offline — re-apply styling in case DOM was rebuilt
+      _applyOfflineBadge();
     }
+    // When online, the badge / hint are managed by startBusPoller which has
+    // the freshest timestamp — don't overwrite it from the stale parent snap.
   }
 
-  // refresh search list if open
+  // ── Refresh bus search list if the search box has a query ───────
   const q2 = q('#route-search')?.value?.trim();
   if (q2 && q2.length > 0) renderBusList(q2);
+}
+
+// ── Badge helpers (single source of truth for styling) ───────────
+function _applyOfflineBadge() {
+  const hint  = q('#map-status-hint');
+  const badge = q('.live-dot-badge');
+  if (hint)  { hint.textContent = '🔴 Driver is Offline (Trip Ended)'; hint.style.color = 'var(--red)'; }
+  if (badge) {
+    badge.innerHTML     = '🔴 OFFLINE';
+    badge.style.background  = 'rgba(107, 114, 128, 0.2)';
+    badge.style.color       = '#6b7280';
+    badge.style.borderColor = '#d1d5db';
+  }
+}
+
+function _applyOnlineBadge(statusText) {
+  const hint  = q('#map-status-hint');
+  const badge = q('.live-dot-badge');
+  if (hint)  { hint.textContent = statusText || '📡 Live Tracking'; hint.style.color = 'var(--green)'; }
+  if (badge) {
+    badge.innerHTML     = '<div class="live-dot-anim"></div> LIVE';
+    badge.style.background  = '';
+    badge.style.color       = '';
+    badge.style.borderColor = '';
+  }
 }
 
 // ─── TAB SWITCH ──────────────────────────────────────────────────
@@ -743,29 +729,40 @@ function startBusPoller(busId) {
   
   const busRef = S.db.ref(`colleges/${S.collegeCode}/buses/${busId}/location`);
   
-  // Real-time listener for ultra-low latency updates
+  // Real-time listener for ultra-low latency location updates
   busRef.on('value', snap => {
     if (!S.trackOn || S.trackedId !== busId) { stopBusPoller(); return; }
-    
-    // Clear the timeout that shows "Signal Lost"
-    if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
-    q('#map-status-hint').textContent = '📡 Live Tracking';
-    q('#map-status-hint').style.color = 'var(--green)';
 
     const loc = snap.val();
+
+    // ── BUG FIX: Only treat a snap as "live" when it has real coordinates.
+    // Previously, setting hint/badge to green happened unconditionally, which
+    // overwrote the 🔴 OFFLINE state set by _handleBusUpdate every time the
+    // location node was null (driver ended trip / node deleted).
     if (loc && loc.lat && loc.lon) {
+      // Valid location received — update map and restore live indicator
       if (S.allBuses[busId]) S.allBuses[busId].location = loc;
       moveBusOnMap(loc.lat, loc.lon);
       updateTrackInfo(loc);
-    }
 
-    // Set a fallback timeout if driver loses signal
-    _studentGpsTimeout = setTimeout(() => {
-      if (S.trackOn) {
-        q('#map-status-hint').textContent = '⚠️ GPS Signal Lost - Showing Last Known Location';
-        q('#map-status-hint').style.color = '#f59e0b';
+      // Only restore the online badge if we are NOT already showing offline
+      // (i.e. the parent /buses listener hasn't flagged the bus as inactive)
+      if (S.trackedBusActive !== false) {
+        _applyOnlineBadge('📡 Live Tracking');
       }
-    }, 15000); // 15 seconds without an update
+
+      // Reset the stale-signal timer
+      if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
+      _studentGpsTimeout = setTimeout(() => {
+        // Only show stale warning if still online (not already offline)
+        if (S.trackOn && S.trackedBusActive !== false) {
+          const hint = q('#map-status-hint');
+          if (hint) { hint.textContent = '⚠️ GPS Signal Lost - Showing Last Known Location'; hint.style.color = '#f59e0b'; }
+        }
+      }, 15000);
+    }
+    // If loc is null: driver deleted / cleared location. Do nothing here —
+    // _handleBusUpdate on the parent listener owns the offline badge transition.
   });
   
   // Store the ref so we can turn off the listener later
@@ -1464,6 +1461,12 @@ function startDriver(resuming = false) {
   }
   S.driverUpdates = 0;
 
+  // ── BUG FIX: Clear offline GPS queue from any PREVIOUS trip.
+  // Without this, coming back online after a trip would re-push stale
+  // coordinates from the last session, snapping the marker to old location.
+  _offlineGpsQueue = [];
+  localStorage.setItem('ba_offline_gps', '[]');
+
   S.driverOn = true;
   BackgroundKeepAlive.start();
   q('#driver-login-view').classList.add('hidden');
@@ -1528,6 +1531,8 @@ function startRobustDriverWatch() {
     );
   }
   doWatch();
+  // Start heartbeat backup so GPS keeps firing even when app is backgrounded
+  _startDriverHeartbeat();
 }
 
 // ─── AI SCENARIO SIMULATION ENGINE ──────────────────────────────
@@ -1643,6 +1648,7 @@ function stopDriver() {
   S.driverOn = false;
   BackgroundKeepAlive.stop();
   stopAiSimulationLoop();
+  _stopDriverHeartbeat(); // stop background GPS heartbeat
   releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
@@ -1684,12 +1690,27 @@ window.addEventListener('online', () => {
   }
 });
 
+// GPS_ACCURACY_THRESHOLD: reject fixes worse than this (meters).
+// 100m is generous — real live-tracking needs at least this quality.
+const GPS_ACCURACY_THRESHOLD = 100;
+
 function onDriverPos(pos) {
   if (!S.driverOn) return;
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
   
-  // Validation: prevent null or 0,0 island coordinates
+  // ── BUG FIX 1: Validate coordinates (null / 0,0 island guard) ──
   if (!lat || !lon || (lat === 0 && lon === 0)) return;
+
+  // ── BUG FIX 2: Accuracy filter — skip low-quality first GPS fixes ──
+  // The browser's GPS often delivers a wildly inaccurate position (100–5000m off)
+  // for the first 1–3 seconds while the hardware locks on. Pushing those to
+  // Firebase is what caused the "wrong location" symptom on the student map.
+  if (accuracy > GPS_ACCURACY_THRESHOLD) {
+    console.warn(`⚠️ GPS fix rejected (accuracy ${Math.round(accuracy)}m > ${GPS_ACCURACY_THRESHOLD}m threshold). Waiting for better signal.`);
+    // Show a non-blocking warning in the driver UI
+    q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ⚠️';
+    return; // Do NOT push to Firebase
+  }
   
   const now = Date.now();
 
@@ -1703,7 +1724,7 @@ function onDriverPos(pos) {
 
   S.driverUpdates++;
   q('#dlc-updates').textContent = S.driverUpdates;
-  q('#dlc-accuracy').textContent = Math.round(accuracy);
+  q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ✅';
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   
@@ -1891,13 +1912,45 @@ function releaseWakeLock() {
   }
 }
 
+// ── BACKGROUND GPS HEARTBEAT ──────────────────────────────
+// When a mobile browser is backgrounded, watchPosition can go dormant.
+// This heartbeat fires getCurrentPosition every 25s as a guaranteed fallback
+// so the driver's location keeps updating even with the app minimized.
+let _driverHeartbeat = null;
+
+function _startDriverHeartbeat() {
+  _stopDriverHeartbeat();
+  _driverHeartbeat = setInterval(() => {
+    if (!S.driverOn || SIMULATION.active) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => onDriverPos(pos),
+      () => {}, // silent fail — watchPosition is the primary source
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  }, 25000); // every 25 seconds
+}
+
+function _stopDriverHeartbeat() {
+  if (_driverHeartbeat) { clearInterval(_driverHeartbeat); _driverHeartbeat = null; }
+}
+
 // Handle visibility change to re-request wake lock and restart robust watches
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible') {
-    if (S.driverOn) startRobustDriverWatch();
+    // Driver: clear old watcher first to prevent duplicate GPS watchers stacking
+    if (S.driverOn) {
+      if (S.driverWid !== null) {
+        navigator.geolocation.clearWatch(S.driverWid);
+        S.driverWid = null;
+      }
+      startRobustDriverWatch();
+    }
     if (S.sleepOn) startRobustSleepWatch();
     if (wakeLock !== null) requestWakeLock();
     if (_wl !== null) reqWakeLock();
+  } else {
+    // App going to background — log for diagnostics
+    if (S.driverOn) console.log('📡 App backgrounded — heartbeat + silent audio keeping GPS alive');
   }
 });
 
@@ -2141,33 +2194,21 @@ function setDriverCrowd(level, btnEl) {
 window.addEventListener('online', () => {
   q('#offline-badge')?.classList.remove('show');
   showToast('🌐 Back online');
-  if (S.driverOn) startDriverLoop(); // Resume sharing location
+  // ── BUG FIX 3: startDriverLoop/stopDriverLoop do not exist.
+  // Use startRobustDriverWatch() to resume GPS sharing when coming back online.
+  if (S.driverOn) startRobustDriverWatch();
 });
 
 window.addEventListener('offline', () => {
   q('#offline-badge')?.classList.add('show');
-  showToast('⚡ Connection lost');
-  if (S.driverOn) stopDriverLoop(); // Pause sharing
+  showToast('⚡ Connection lost — GPS caching locally...');
+  // No need to stop the watchPosition — let it keep recording to the offline queue
 });
 
-function doInstall() {
-  if (_installPrompt) {
-    _installPrompt.prompt();
-    _installPrompt.userChoice.then(result => {
-      if (result.outcome === 'accepted') showToast('🎉 BusAlert installed!');
-      _installPrompt = null;
-      dismissInstall();
-    });
-  } else {
-    showToast('On iPhone: tap Share → "Add to Home Screen"');
-    dismissInstall();
-  }
-}
-
-function dismissInstall() {
-  const banner = q('#install-banner');
-  if (banner) banner.classList.add('hidden');
-}
+// NOTE: doInstall() and dismissInstall() are defined above (lines ~2085–2097).
+// ── BUG FIX 4: Removed duplicate definitions that silently overrode the
+//    earlier async versions (which save the dismiss timestamp to localStorage).
+//    The async versions are the correct ones and are kept above.
 
 window.addEventListener('appinstalled', () => {
   dismissInstall();
@@ -2584,3 +2625,132 @@ function switchRole() {
   closeProfile();
   location.reload();
 }
+
+// ─── PULL-TO-REFRESH ─────────────────────────────────────────────
+// Intercepts touch-pull-down on the app shell and performs a soft
+// data refresh (re-fetches buses, restarts poller, invalidates map)
+// WITHOUT a page reload — so all tracking state is preserved.
+(function initPullToRefresh() {
+  const PTR_THRESHOLD = 72;   // px of pull needed to trigger refresh
+  const PTR_MAX_PULL  = 110;  // max visual travel (rubber-band stop)
+
+  let _ptrStartY    = 0;
+  let _ptrDist      = 0;
+  let _ptrActive    = false;
+  let _ptrRefreshing = false;
+
+  const appEl = document.getElementById('app');
+  const ptrEl = document.getElementById('ptr-indicator');
+  const ptrLabel = ptrEl?.querySelector('.ptr-label');
+
+  if (!appEl || !ptrEl) return; // guard: elements not ready yet
+
+  function _getScrollTop() {
+    // Find whichever panel is currently active and check its scroll
+    const active = appEl.querySelector('.panel.active');
+    return active ? active.scrollTop : 0;
+  }
+
+  appEl.addEventListener('touchstart', e => {
+    if (_ptrRefreshing) return;
+    _ptrStartY = e.touches[0].clientY;
+    _ptrDist   = 0;
+    _ptrActive = false;
+  }, { passive: true });
+
+  appEl.addEventListener('touchmove', e => {
+    if (_ptrRefreshing) return;
+    const y    = e.touches[0].clientY;
+    const diff = y - _ptrStartY;
+
+    // Only activate pull-to-refresh when:
+    //   1. User is pulling DOWN (diff > 0)
+    //   2. The active panel is scrolled to the very top (scrollTop === 0)
+    if (diff > 0 && _getScrollTop() === 0) {
+      _ptrActive = true;
+      _ptrDist   = Math.min(diff * 0.55, PTR_MAX_PULL); // dampen the movement
+
+      if (_ptrDist > 8) {
+        ptrEl.classList.add('ptr-pulling');
+        ptrEl.classList.remove('ptr-refreshing');
+        if (ptrLabel) {
+          ptrLabel.textContent = _ptrDist >= PTR_THRESHOLD
+            ? 'Release to refresh'
+            : 'Pull down to refresh';
+        }
+      }
+    } else {
+      _ptrActive = false;
+    }
+  }, { passive: true });
+
+  appEl.addEventListener('touchend', () => {
+    if (!_ptrActive || _ptrRefreshing) {
+      ptrEl.classList.remove('ptr-pulling');
+      return;
+    }
+    _ptrActive = false;
+
+    if (_ptrDist >= PTR_THRESHOLD) {
+      // ── TRIGGERED: do a soft data refresh ──
+      _ptrRefreshing = true;
+      ptrEl.classList.add('ptr-refreshing');
+      if (ptrLabel) ptrLabel.textContent = 'Refreshing...';
+
+      _doSoftRefresh().finally(() => {
+        setTimeout(() => {
+          ptrEl.classList.remove('ptr-pulling', 'ptr-refreshing');
+          _ptrRefreshing = false;
+          _ptrDist = 0;
+        }, 600);
+      });
+    } else {
+      // Not pulled far enough — snap back
+      ptrEl.classList.remove('ptr-pulling');
+      _ptrDist = 0;
+    }
+  }, { passive: true });
+
+  /**
+   * Soft refresh: re-fetches Firebase bus data and re-renders the UI
+   * without destroying any active Firebase listeners or tracking state.
+   */
+  async function _doSoftRefresh() {
+    try {
+      // 1. Re-fetch live bus data from Firebase (one-time fetch to update S.allBuses)
+      if (S.db && S.collegeCode) {
+        const snap = await S.db.ref('colleges/' + S.collegeCode + '/buses').once('value');
+        S.allBuses = snap.val() || {};
+      }
+
+      // 2. Re-render the bus list (search tab)
+      const searchVal = q('#route-search')?.value?.trim() || '';
+      renderBusList(searchVal);
+
+      // 3. If tracking a bus, restart the precise location poller
+      if (S.trackOn && S.trackedId) {
+        startBusPoller(S.trackedId);
+
+        // Also move marker to current known location immediately
+        const loc = S.allBuses[S.trackedId]?.location;
+        if (loc && loc.lat && loc.lon) {
+          moveBusOnMap(loc.lat, loc.lon);
+          updateTrackInfo(loc);
+        }
+      }
+
+      // 4. Invalidate Leaflet map in case layout shifted while backgrounded
+      if (S.map) {
+        setTimeout(() => S.map.invalidateSize(true), 100);
+      }
+
+      // 5. Refresh profile info (name / role badge)
+      renderProfileInfo();
+
+      showToast('✅ Refreshed!');
+    } catch (e) {
+      console.warn('Pull-to-refresh error:', e);
+      showToast('⚠️ Refresh failed — check connection.');
+    }
+  }
+})();
