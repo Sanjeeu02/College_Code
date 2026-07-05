@@ -2359,6 +2359,22 @@ async function checkEmailExists(email) {
   return false;
 }
 
+// ─── ROLE CONFLICT GUARD ─────────────────────────────────────────
+// Returns the stored role for an email across all collections, or null.
+// Used to block a user from logging in under a different role than registered.
+async function getRoleByEmail(email) {
+  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
+  if (!qs.empty) return 'student';
+  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
+  if (!qs.empty) return 'driver';
+  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
+  if (!qs.empty) return 'admin';
+  return null;
+}
+
+// Capitalises a role name for display (e.g. 'student' → 'Student')
+function capitaliseRole(r) { return r ? r.charAt(0).toUpperCase() + r.slice(1) : r; }
+
 function showRoleScreen() {
   q('#role-screen').classList.remove('hidden');
   q('#auth-screen').classList.add('hidden');
@@ -2443,21 +2459,26 @@ async function handleAuthSubmit() {
     } else {
       const res = await S.auth.signInWithEmailAndPassword(email, pass);
       user = res.user;
-      // ⚡ Check localStorage cache first — skip DB round-trip
-      const cachedRole = localStorage.getItem('ba_cached_role');
-      const cachedCode  = localStorage.getItem('ba_college_code');
-      if (cachedRole) {
-        S.user = user;
-        S.role = cachedRole;
-        if (cachedCode) S.collegeCode = cachedCode;
-      } else {
-        // First time on this device — fetch from DB once (also restores collegeCode)
-        S.role = await getRoleByUid(user.uid);
-        S.user = user;
+
+      // ── ROLE CONFLICT CHECK ────────────────────────────────────
+      // Fetch stored role from Firestore (source of truth).
+      // If it doesn't match the role screen selection, block access.
+      const storedRole = await getRoleByUid(user.uid);
+      if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
+        await S.auth.signOut();
+        err.innerHTML =
+          `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
+          `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
+          `or go back and select <b>${capitaliseRole(storedRole)}</b>.`;
+        if (btn) btn.disabled = false;
+        return;
       }
+      // ──────────────────────────────────────────────────────────
+
+      S.user = user;
+      S.role = storedRole;
       if (!S.role) { err.textContent = '⚠️ No role found. Please register first.'; return; }
     }
-    // Cache role + college code for instant future logins
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
     handleAuthSuccess(user);
@@ -2476,44 +2497,49 @@ async function loginWithGoogle() {
   
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    
-    // FIX: Use signInWithPopup on ALL devices (including mobile).
-    // signInWithRedirect caused Chrome's Bounce Tracking Protection to flag
-    // smartbustracker-ef456.firebaseapp.com as a tracking site and delete
-    // cookies/storage, breaking the auth flow.
-    // signInWithPopup never visits firebaseapp.com as an intermediate domain
-    // so it is completely immune to this Chrome privacy restriction.
     S.authInProgress = true;
     const res = await S.auth.signInWithPopup(provider);
     const user = res.user;
+
+    // ── ROLE CONFLICT CHECK ──────────────────────────────────────
+    // Always query Firestore by UID to get the stored role.
+    // If a role exists and it doesn't match what the user selected
+    // on the role screen, block access immediately and sign out.
+    const storedRole = await getRoleByUid(user.uid);
+
+    if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
+      // Sign the user out so Firebase session is not left open
+      await S.auth.signOut();
+      S.authInProgress = false;
+      err.innerHTML =
+        `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
+        `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
+        `or go back and select <b>${capitaliseRole(storedRole)}</b>.`;
+      return;
+    }
+    // ────────────────────────────────────────────────────────────
+
     S.user = user;
 
-    const cachedRole = localStorage.getItem('ba_cached_role');
-    const cachedCode  = localStorage.getItem('ba_college_code');
-    if (cachedRole) {
-      S.role = cachedRole;
-      if (cachedCode) S.collegeCode = cachedCode;
+    if (storedRole) {
+      // Returning user — role already in Firestore (collegeCode also restored by getRoleByUid)
+      S.role = storedRole;
     } else {
-      // First time on this device — also fetches + caches collegeCode from Firestore
-      const foundRole = await getRoleByUid(user.uid);
-      if (foundRole) {
-        S.role = foundRole;
-      } else {
-        // Brand-new user: assign the role they selected on the role screen
-        const role = S.selectedRole || 'student';
-        const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-        if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-        else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-        else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-        S.role = role;
-      }
+      // Brand-new user — save their selected role to Firestore
+      const role = S.selectedRole || 'student';
+      const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
+      if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+      else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+      else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+      S.role = role;
     }
+
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
     S.authInProgress = false;
     handleAuthSuccess(user);
   } catch (e) {
-    S.authInProgress = false; // always reset on error
+    S.authInProgress = false;
     if (e.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
       err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
