@@ -2520,7 +2520,10 @@ function resetAuthLoading(errorMsg) {
 async function loginWithGoogle() {
   if (!S.auth || !S.db) { q('#auth-err').textContent = '⏳ Firebase not ready.'; return; }
   const err = q('#auth-err');
-  err.textContent = '🌐 Opening Google sign-in...';
+  err.textContent = '';
+
+  // ── LOCK THE UI immediately so the user can't click anything else ──
+  showAuthLoading('Signing you in...');
   
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
@@ -2528,20 +2531,21 @@ async function loginWithGoogle() {
     const res = await S.auth.signInWithPopup(provider);
     const user = res.user;
 
+    // Update loading message while we fetch role from Firestore
+    const msgEl = q('#auth-loading-msg');
+    if (msgEl) msgEl.textContent = 'Verifying your account...';
+
     // ── ROLE CONFLICT CHECK ──────────────────────────────────────
-    // Always query Firestore by UID to get the stored role.
-    // If a role exists and it doesn't match what the user selected
-    // on the role screen, block access immediately and sign out.
     const storedRole = await getRoleByUid(user.uid);
 
     if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
-      // Sign the user out so Firebase session is not left open
       await S.auth.signOut();
       S.authInProgress = false;
-      err.innerHTML =
+      resetAuthLoading(
         `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
         `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
-        `or go back and select <b>${capitaliseRole(storedRole)}</b>.`;
+        `or go back and select <b>${capitaliseRole(storedRole)}</b>.`
+      );
       return;
     }
     // ────────────────────────────────────────────────────────────
@@ -2549,10 +2553,9 @@ async function loginWithGoogle() {
     S.user = user;
 
     if (storedRole) {
-      // Returning user — role already in Firestore (collegeCode also restored by getRoleByUid)
       S.role = storedRole;
     } else {
-      // Brand-new user — save their selected role to Firestore
+      if (msgEl) msgEl.textContent = 'Setting up your account...';
       const role = S.selectedRole || 'student';
       const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
       if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
@@ -2564,16 +2567,21 @@ async function loginWithGoogle() {
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
     S.authInProgress = false;
+    resetAuthLoading(''); // Clear overlay state cleanly
     handleAuthSuccess(user);
   } catch (e) {
     S.authInProgress = false;
-    if (e.code === 'auth/unauthorized-domain') {
+    if (e.code === 'auth/popup-closed-by-user') {
+      // User dismissed the popup — restore form cleanly with no error
+      resetAuthLoading('');
+    } else if (e.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
-      err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
-    } else if (e.code !== 'auth/popup-closed-by-user') {
-      err.textContent = '❌ ' + e.message;
+      resetAuthLoading(
+        `❌ Domain <b>${domain}</b> not authorized.<br><br>` +
+        `Add it in <b>Firebase Console → Auth → Settings → Authorized Domains</b>.`
+      );
     } else {
-      err.textContent = '';
+      resetAuthLoading('❌ ' + e.message);
     }
   }
 }
