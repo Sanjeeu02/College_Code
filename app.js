@@ -2391,98 +2391,102 @@ function selectRole(role) {
 }
 
 function backToRoles() {
-  q('#au  if (!S.auth || !S.db) { q('#auth-err').textContent = '⏳ Firebase not ready.'; return; }
-  const err = q('#auth-err');
-  err.textContent = '';
+  q('#auth-screen').classList.add('hidden');
+  q('#role-screen').classList.remove('hidden');
+}
 
-  // ── LOCK THE UI immediately so the user can't click anything else ──
-  showAuthLoading('Signing you in...');
+function toggleAuthMode() {
+  S.isRegisterMode = !S.isRegisterMode;
+  renderAuthMode();
+}
+
+function renderAuthMode() {
+  const isReg = S.isRegisterMode;
+  q('#auth-title').textContent = isReg ? 'Register' : 'Login';
+  q('#auth-submit-btn').textContent = isReg ? 'Sign up' : 'Login';
+  q('#auth-switch').textContent = isReg ? 'Sign in' : 'Sign up';
   
+  // Update the footer text prefix
+  const footerPrefix = q('.footer-v4 p')?.childNodes[0];
+  if (footerPrefix) {
+    footerPrefix.textContent = isReg ? 'Already have an account? ' : "Don't have an account? ";
+  }
+
+  q('#reg-fields').classList.toggle('hidden', !isReg);
+  q('#confirm-pass-wrap').classList.toggle('hidden', !isReg);
+  q('#auth-err').textContent = '';
+}
+
+async function handleAuthSubmit() {
+  const email = q('#auth-email').value.trim();
+  const pass = q('#auth-pass').value;
+  const name = q('#auth-user').value.trim();
+  const confirm = q('#auth-pass-confirm').value;
+  const err = q('#auth-err');
+  const btn = q('#auth-submit-btn');
+
+  if (!email || !pass) { err.textContent = '⚠️ Enter email and password.'; return; }
+  if (S.isRegisterMode) {
+    if (!name) { err.textContent = '⚠️ Enter your full name.'; return; }
+    if (pass !== confirm) { err.textContent = '❌ Passwords do not match.'; return; }
+    if (pass.length < 6) { err.textContent = '⚠️ Password too weak.'; return; }
+  }
+
+  showAuthLoading(S.isRegisterMode ? 'Creating your account...' : 'Signing you in...');
+
   try {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    S.authInProgress = true;
-    const res = await S.auth.signInWithPopup(provider);
-    const user = res.user;
+    let user;
+    if (S.isRegisterMode) {
+      const exists = await checkEmailExists(email);
+      if (exists) {
+        resetAuthLoading('❌ Email is already registered.');
+        return;
+      }
 
-    // Update loading message while we fetch role from Firestore
-    const msgEl = q('#auth-loading-msg');
-    if (msgEl) msgEl.textContent = 'Verifying your account...';
+      const res = await S.auth.createUserWithEmailAndPassword(email, pass);
+      user = res.user;
+      await user.updateProfile({ displayName: name });
+      
+      const docData = { name, email, role: S.selectedRole, createdAt: Date.now() };
+      if (S.selectedRole === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+      else if (S.selectedRole === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+      else if (S.selectedRole === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
 
-    // ── ROLE CONFLICT CHECK ────────────────────────────────────
-    const storedRole = await getRoleByUid(user.uid);
-
-    if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
-      await S.auth.signOut();
-      S.authInProgress = false;
-      resetAuthLoading(
-        `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-        `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
-        `or go back and select <b>${capitaliseRole(storedRole)}</b>.`
-      );
-      return;
-    }
-    // ────────────────────────────────────────────────────────────
-
-    S.user = user;
-
-    if (storedRole) {
-      S.role = storedRole;
+      S.user = user;
+      S.role = S.selectedRole;
     } else {
-      if (msgEl) msgEl.textContent = 'Setting up your account...';
-      const role = S.selectedRole || 'student';
-      const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-      if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-      S.role = role;
-    }
+      const res = await S.auth.signInWithEmailAndPassword(email, pass);
+      user = res.user;
 
-    localStorage.setItem('ba_cached_role', S.role);
-    if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
-    S.authInProgress = false;
-    // Overlay stays visible — handleAuthSuccess() hides the entire auth-screen
-    handleAuthSuccess(user);
-  } catch (e) {
-    S.authInProgress = false;
-    if (e.code === 'auth/popup-closed-by-user') {
-      // User dismissed the popup — restore form cleanly with no error
-      resetAuthLoading('');
-    } else if (e.code === 'auth/unauthorized-domain') {
-      const domain = window.location.hostname;
-      resetAuthLoading(
-        `❌ Domain <b>${domain}</b> not authorized.<br><br>` +
-        `Add it in <b>Firebase Console → Auth → Settings → Authorized Domains</b>.`
-      );
-    } else {
-      resetAuthLoading('❌ ' + e.message);
-    }
-  }�
-      // Fetch stored role from Firestore (source of truth).
-      // If it doesn't match the role screen selection, block access.
+      // ── ROLE CONFLICT CHECK ────────────────────────────────────
       const storedRole = await getRoleByUid(user.uid);
       if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
         await S.auth.signOut();
-        err.innerHTML =
+        resetAuthLoading(
           `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
           `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
-          `or go back and select <b>${capitaliseRole(storedRole)}</b>.`;
-        if (btn) btn.disabled = false;
+          `or go back and select <b>${capitaliseRole(storedRole)}</b>.`
+        );
         return;
       }
       // ──────────────────────────────────────────────────────────
 
       S.user = user;
       S.role = storedRole;
-      if (!S.role) { err.textContent = '⚠️ No role found. Please register first.'; return; }
+      if (!S.role) {
+        resetAuthLoading('⚠️ No role found. Please register first.');
+        return;
+      }
     }
+    // Cache role + college code for instant future logins
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
+    resetAuthLoading('');
     handleAuthSuccess(user);
   } catch (e) {
-    err.textContent = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
+    const errorMsg = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
       ? 'Incorrect email or password.' : e.message);
-  } finally {
-    if (btn) btn.disabled = false;
+    resetAuthLoading(errorMsg);
   }
 }
 
