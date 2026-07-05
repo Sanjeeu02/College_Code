@@ -2402,10 +2402,21 @@ function toggleAuthMode() {
 
 function renderAuthMode() {
   const isReg = S.isRegisterMode;
-  q('#auth-title').textContent = isReg ? 'Register' : 'Login';
+  const roleName = capitaliseRole(S.selectedRole || 'student');
+  
+  q('#auth-title').textContent = `${roleName} ${isReg ? 'Registration' : 'Login'}`;
   q('#auth-submit-btn').textContent = isReg ? 'Sign up' : 'Login';
   q('#auth-switch').textContent = isReg ? 'Sign in' : 'Sign up';
   
+  // Update Google Button text dynamically
+  const googleBtn = q('#google-signin-btn');
+  if (googleBtn) {
+    googleBtn.innerHTML = `
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+      Continue as ${roleName} with Google
+    `;
+  }
+
   // Update the footer text prefix
   const footerPrefix = q('.footer-v4 p')?.childNodes[0];
   if (footerPrefix) {
@@ -2464,8 +2475,7 @@ async function handleAuthSubmit() {
         await S.auth.signOut();
         resetAuthLoading(
           `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-          `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
-          `or go back and select <b>${capitaliseRole(storedRole)}</b>.`
+          `Please login using the correct role.`
         );
         return;
       }
@@ -2543,8 +2553,7 @@ async function loginWithGoogle() {
       S.authInProgress = false;
       resetAuthLoading(
         `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-        `Please use a different email to continue as a <b>${capitaliseRole(S.selectedRole)}</b>, ` +
-        `or go back and select <b>${capitaliseRole(storedRole)}</b>.`
+        `Please login using the correct role.`
       );
       return;
     }
