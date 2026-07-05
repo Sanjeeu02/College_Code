@@ -287,11 +287,20 @@ function connectFb(cfg) {
     setStatus('Connected', true);
 
     // ⚡ Unified Auth Handler (Handles both normal load and redirects)
-    let redirectHandled = false;
+    // FIX: Use a Promise-based flag so onAuthStateChanged can reliably await
+    // getRedirectResult completion before deciding what to do.
+    let _redirectResultResolve;
+    const _redirectResultPromise = new Promise(res => { _redirectResultResolve = res; });
+    // FIX: _authInProgress prevents onAuthStateChanged from double-firing
+    // during the popup flow where S.user is set before S.role.
+    let _authInProgress = false;
 
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
-        redirectHandled = true;
+        // FIX: Mark redirect as handled IMMEDIATELY (before any async awaits)
+        // so the onAuthStateChanged guard below sees it right away.
+        _redirectResultResolve(true);
+        _authInProgress = true;
         const user = result.user;
         S.user = user;
         showToast('🌐 Google Sign-in successful!');
@@ -310,9 +319,14 @@ function connectFb(cfg) {
         localStorage.setItem('ba_cached_role', S.role);
         if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
         localStorage.removeItem('ba_pending_role');
+        _authInProgress = false;
         handleAuthSuccess(user);
+      } else {
+        // No redirect result — signal onAuthStateChanged it's safe to proceed
+        _redirectResultResolve(false);
       }
     }).catch(e => {
+      _redirectResultResolve(false); // unblock onAuthStateChanged on error too
       console.error("Redirect Auth Error:", e);
       if (e.code === 'auth/unauthorized-domain') {
         const d = window.location.hostname;
@@ -323,52 +337,58 @@ function connectFb(cfg) {
     });
 
     S.auth.onAuthStateChanged(async user => {
-      setTimeout(async () => {
-        if (redirectHandled) return;
-        if (S.user && S.role) return;
+      // FIX: Wait for getRedirectResult to finish before doing anything.
+      // This eliminates the 800ms blind setTimeout and the race condition.
+      const wasRedirect = await _redirectResultPromise;
+      if (wasRedirect) return; // redirect flow already handled everything
+      if (_authInProgress) return; // popup flow is mid-flight, let it finish
+      // FIX: Guard on BOTH S.user AND S.role being set — not just one.
+      if (S.user && S.role) return;
         
-        if (user) {
-          S.user = user;
+      if (user) {
+        S.user = user;
           
-          // 1. Try Cache — restore both role AND college code instantly
-          const cachedRole = localStorage.getItem('ba_cached_role');
-          const cachedCollegeCode = localStorage.getItem('ba_college_code');
-          if (cachedRole) {
-            S.role = cachedRole;
-            if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
-            handleAuthSuccess(user);
-            return;
-          }
+        // 1. Try Cache — restore both role AND college code instantly
+        const cachedRole = localStorage.getItem('ba_cached_role');
+        const cachedCollegeCode = localStorage.getItem('ba_college_code');
+        if (cachedRole) {
+          S.role = cachedRole;
+          if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
+          handleAuthSuccess(user);
+          return;
+        }
 
-          // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
-          S.role = await getRoleByUid(user.uid);
+        // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
+        S.role = await getRoleByUid(user.uid);
           
-          // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
-          if (!S.role) {
-            const pendingRole = localStorage.getItem('ba_pending_role');
-            if (pendingRole) {
-              S.role = pendingRole;
-              const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
-              if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-              else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-              else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+        // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
+        if (!S.role) {
+          const pendingRole = localStorage.getItem('ba_pending_role');
+          if (pendingRole) {
+            S.role = pendingRole;
+            const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
+            if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+            else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+            else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
               
-              localStorage.setItem('ba_cached_role', S.role);
-              localStorage.removeItem('ba_pending_role');
-            }
+            localStorage.setItem('ba_cached_role', S.role);
+            localStorage.removeItem('ba_pending_role');
           }
+        }
 
-          if (S.role) {
-            handleAuthSuccess(user);
-          } else {
-            showRoleScreen();
-          }
+        if (S.role) {
+          handleAuthSuccess(user);
         } else {
+          showRoleScreen();
+        }
+      } else {
+        // User logged out — only clear cache if not mid-auth
+        if (!_authInProgress) {
           localStorage.removeItem('ba_cached_role');
           localStorage.removeItem('ba_college_code');
           showRoleScreen();
         }
-      }, 800); // Slightly longer delay to ensure Firestore is ready
+      }
     });
 
     // NOTE: startBusListener() is called in handleAuthSuccess() AFTER
@@ -2463,7 +2483,13 @@ async function loginWithGoogle() {
       // ⚡ IMPORTANT: Save role intent before redirecting
       localStorage.setItem('ba_pending_role', S.selectedRole || 'student');
       await S.auth.signInWithRedirect(provider);
+      // NOTE: Page will reload after redirect — execution stops here.
+      // handleAuthSuccess() is called by getRedirectResult() in connectFb().
     } else {
+      // FIX: Set _authInProgress before the popup so onAuthStateChanged
+      // (which fires immediately after signInWithPopup resolves) doesn't
+      // race against our own role-loading logic below.
+      _authInProgress = true;
       const res = await S.auth.signInWithPopup(provider);
       const user = res.user;
       S.user = user;
@@ -2479,6 +2505,7 @@ async function loginWithGoogle() {
         if (foundRole) {
           S.role = foundRole;
         } else {
+          // Brand-new user: assign the role they selected on the role screen
           const role = S.selectedRole || 'student';
           const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
           if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
@@ -2489,9 +2516,13 @@ async function loginWithGoogle() {
       }
       localStorage.setItem('ba_cached_role', S.role);
       if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
+      // FIX: Clear _authInProgress BEFORE calling handleAuthSuccess so any
+      // subsequent onAuthStateChanged events are processed normally.
+      _authInProgress = false;
       handleAuthSuccess(user);
     }
   } catch (e) {
+    _authInProgress = false; // always reset on error
     if (e.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
       err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
