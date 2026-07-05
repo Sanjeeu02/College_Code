@@ -39,6 +39,7 @@ const S = {
 
   // Auth & Role
   auth: null, user: null, role: null, isRegisterMode: false, selectedRole: null, collegeCode: null,
+  authInProgress: false, // prevents onAuthStateChanged from racing popup/redirect flow
 };
 
 // ─── BUS POLLER (backup for Firebase listener) ──────────────────
@@ -291,16 +292,16 @@ function connectFb(cfg) {
     // getRedirectResult completion before deciding what to do.
     let _redirectResultResolve;
     const _redirectResultPromise = new Promise(res => { _redirectResultResolve = res; });
-    // FIX: _authInProgress prevents onAuthStateChanged from double-firing
-    // during the popup flow where S.user is set before S.role.
-    let _authInProgress = false;
+    // NOTE: S.authInProgress is defined on the global S object so loginWithGoogle()
+    // (a separate global function) can also set/read it without a ReferenceError.
+    S.authInProgress = false;
 
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
         // FIX: Mark redirect as handled IMMEDIATELY (before any async awaits)
         // so the onAuthStateChanged guard below sees it right away.
         _redirectResultResolve(true);
-        _authInProgress = true;
+        S.authInProgress = true;
         const user = result.user;
         S.user = user;
         showToast('🌐 Google Sign-in successful!');
@@ -319,7 +320,7 @@ function connectFb(cfg) {
         localStorage.setItem('ba_cached_role', S.role);
         if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
         localStorage.removeItem('ba_pending_role');
-        _authInProgress = false;
+        S.authInProgress = false;
         handleAuthSuccess(user);
       } else {
         // No redirect result — signal onAuthStateChanged it's safe to proceed
@@ -341,7 +342,7 @@ function connectFb(cfg) {
       // This eliminates the 800ms blind setTimeout and the race condition.
       const wasRedirect = await _redirectResultPromise;
       if (wasRedirect) return; // redirect flow already handled everything
-      if (_authInProgress) return; // popup flow is mid-flight, let it finish
+      if (S.authInProgress) return; // popup flow is mid-flight, let it finish
       // FIX: Guard on BOTH S.user AND S.role being set — not just one.
       if (S.user && S.role) return;
         
@@ -383,7 +384,7 @@ function connectFb(cfg) {
         }
       } else {
         // User logged out — only clear cache if not mid-auth
-        if (!_authInProgress) {
+        if (!S.authInProgress) {
           localStorage.removeItem('ba_cached_role');
           localStorage.removeItem('ba_college_code');
           showRoleScreen();
@@ -2486,10 +2487,10 @@ async function loginWithGoogle() {
       // NOTE: Page will reload after redirect — execution stops here.
       // handleAuthSuccess() is called by getRedirectResult() in connectFb().
     } else {
-      // FIX: Set _authInProgress before the popup so onAuthStateChanged
+      // FIX: Set S.authInProgress before the popup so onAuthStateChanged
       // (which fires immediately after signInWithPopup resolves) doesn't
       // race against our own role-loading logic below.
-      _authInProgress = true;
+      S.authInProgress = true;
       const res = await S.auth.signInWithPopup(provider);
       const user = res.user;
       S.user = user;
@@ -2516,13 +2517,13 @@ async function loginWithGoogle() {
       }
       localStorage.setItem('ba_cached_role', S.role);
       if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
-      // FIX: Clear _authInProgress BEFORE calling handleAuthSuccess so any
+      // FIX: Clear S.authInProgress BEFORE calling handleAuthSuccess so any
       // subsequent onAuthStateChanged events are processed normally.
-      _authInProgress = false;
+      S.authInProgress = false;
       handleAuthSuccess(user);
     }
   } catch (e) {
-    _authInProgress = false; // always reset on error
+    S.authInProgress = false; // always reset on error
     if (e.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
       err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
