@@ -2477,51 +2477,41 @@ async function loginWithGoogle() {
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
     
-    // Check if mobile (Redirect is more reliable on mobile)
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-      // ⚡ IMPORTANT: Save role intent before redirecting
-      localStorage.setItem('ba_pending_role', S.selectedRole || 'student');
-      await S.auth.signInWithRedirect(provider);
-      // NOTE: Page will reload after redirect — execution stops here.
-      // handleAuthSuccess() is called by getRedirectResult() in connectFb().
-    } else {
-      // FIX: Set S.authInProgress before the popup so onAuthStateChanged
-      // (which fires immediately after signInWithPopup resolves) doesn't
-      // race against our own role-loading logic below.
-      S.authInProgress = true;
-      const res = await S.auth.signInWithPopup(provider);
-      const user = res.user;
-      S.user = user;
+    // FIX: Use signInWithPopup on ALL devices (including mobile).
+    // signInWithRedirect caused Chrome's Bounce Tracking Protection to flag
+    // smartbustracker-ef456.firebaseapp.com as a tracking site and delete
+    // cookies/storage, breaking the auth flow.
+    // signInWithPopup never visits firebaseapp.com as an intermediate domain
+    // so it is completely immune to this Chrome privacy restriction.
+    S.authInProgress = true;
+    const res = await S.auth.signInWithPopup(provider);
+    const user = res.user;
+    S.user = user;
 
-      const cachedRole = localStorage.getItem('ba_cached_role');
-      const cachedCode  = localStorage.getItem('ba_college_code');
-      if (cachedRole) {
-        S.role = cachedRole;
-        if (cachedCode) S.collegeCode = cachedCode;
+    const cachedRole = localStorage.getItem('ba_cached_role');
+    const cachedCode  = localStorage.getItem('ba_college_code');
+    if (cachedRole) {
+      S.role = cachedRole;
+      if (cachedCode) S.collegeCode = cachedCode;
+    } else {
+      // First time on this device — also fetches + caches collegeCode from Firestore
+      const foundRole = await getRoleByUid(user.uid);
+      if (foundRole) {
+        S.role = foundRole;
       } else {
-        // First time on this device — also fetches + caches collegeCode from Firestore
-        const foundRole = await getRoleByUid(user.uid);
-        if (foundRole) {
-          S.role = foundRole;
-        } else {
-          // Brand-new user: assign the role they selected on the role screen
-          const role = S.selectedRole || 'student';
-          const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-          if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-          else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-          else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-          S.role = role;
-        }
+        // Brand-new user: assign the role they selected on the role screen
+        const role = S.selectedRole || 'student';
+        const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
+        if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+        else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+        else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+        S.role = role;
       }
-      localStorage.setItem('ba_cached_role', S.role);
-      if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
-      // FIX: Clear S.authInProgress BEFORE calling handleAuthSuccess so any
-      // subsequent onAuthStateChanged events are processed normally.
-      S.authInProgress = false;
-      handleAuthSuccess(user);
     }
+    localStorage.setItem('ba_cached_role', S.role);
+    if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
+    S.authInProgress = false;
+    handleAuthSuccess(user);
   } catch (e) {
     S.authInProgress = false; // always reset on error
     if (e.code === 'auth/unauthorized-domain') {
