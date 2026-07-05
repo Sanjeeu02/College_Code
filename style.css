@@ -2371,6 +2371,74 @@ body {
   flex-direction: column;
 }
 
+/* ── Auth Loading Overlay ── */
+.auth-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: rgba(245, 243, 255, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 20px;
+  animation: authOverlayIn 0.25s ease forwards;
+}
+
+@keyframes authOverlayIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.auth-loading-overlay.hidden {
+  display: none;
+}
+
+/* Spinning gradient ring */
+.auth-spinner {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 4px solid transparent;
+  border-top-color: #6366f1;
+  border-right-color: #8b5cf6;
+  animation: authSpin 0.75s linear infinite;
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.25);
+}
+
+@keyframes authSpin {
+  to { transform: rotate(360deg); }
+}
+
+.auth-loading-overlay p {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0.2px;
+  animation: authPulse 1.4s ease-in-out infinite;
+  margin: 0;
+}
+
+@keyframes authPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* Form body blurs when loading is active */
+#auth-form-body {
+  transition: filter 0.25s ease, opacity 0.25s ease;
+}
+
+#auth-form-body.auth-blurred {
+  filter: blur(3px);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+}
+
 .auth-v4-container {
   display: flex;
   width: 100%;

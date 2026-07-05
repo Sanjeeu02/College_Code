@@ -85,13 +85,19 @@
             <div class="auth-v4-left">
                 <div class="auth-v4-box">
                     
-                    
+                    <!-- ⏳ Auth Loading Overlay (shown during Google sign-in) -->
+                    <div id="auth-loading-overlay" class="auth-loading-overlay hidden">
+                        <div class="auth-spinner"></div>
+                        <p id="auth-loading-msg">Signing you in...</p>
+                    </div>
+
+                    <div id="auth-form-body">
                     <div class="auth-v4-header">
                         <div class="auth-v4-logo">🚌</div>
                         <h1 id="auth-title">Login</h1>
                     </div>
 
-                    <button class="google-btn-v4" onclick="loginWithGoogle()">
+                    <button class="google-btn-v4" id="google-signin-btn" onclick="loginWithGoogle()">
                         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
                         Sign in with Google
                     </button>
@@ -129,6 +135,8 @@
                         <p>Don't have an account? <span id="auth-switch" onclick="toggleAuthMode()">Sign up</span></p>
                         <p style="margin-top: 12px; opacity: 0.7;">Wrong role? <span onclick="backToRoles()">Back to Selection</span></p>
                     </div>
+                    </div><!-- end #auth-form-body -->
+
                 </div>
             </div>
 
