@@ -235,14 +235,27 @@ function loadLocal() {
   const sr = lsGet('ba_sr'); if (sr) { q('#sleep-radius').value = sr; updateRadius('sleep'); }
   const tr = lsGet('ba_tr'); if (tr) { q('#track-radius').value = tr; updateRadius('track'); }
 
-  // Restore driver session
+  // Restore driver session — only if it was started within the last 4 hours.
+  // ── PRIMARY FIX for the "location switches to developer device" bug ──
+  // Without this check, a stale ba_driver_session from earlier testing sets
+  // S.driverOn=true on the developer's device, starts the GPS heartbeat, and
+  // pushes the developer's coordinates to Firebase, overwriting the real
+  // driver's location on the student's map.
+  const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
   const ds = ls('ba_driver_session');
-  if (ds && ds.active) {
+  const sessionIsValid = ds && ds.active && ds.startedAt &&
+    (Date.now() - ds.startedAt < SESSION_MAX_AGE_MS);
+  if (sessionIsValid) {
     _driverProfile = ds.profile;
     S.driverBusId = ds.busId;
     S.driverAccessCode = ds.accessCode;
     S.driverOn = true;
     startDriver(true); // true means resuming
+  } else if (ds && ds.active) {
+    // Session exists but is stale or has no startedAt timestamp — clear it
+    // so it cannot auto-resume and pollute Firebase with developer-device GPS.
+    lsSave('ba_driver_session', { active: false });
+    console.warn('🕐 Stale driver session cleared — not auto-resuming.');
   }
 }
 
@@ -836,13 +849,18 @@ function stopTracking() {
 }
 
 function stopTrackingInner(silent) {
+  // FIX: Stop the Firebase listener FIRST before clearing S.trackedId.
+  // If we clear trackedId first, the listener's internal guard
+  // (S.trackedId !== busId) becomes true immediately and the listener
+  // may fire one final time and call moveBusOnMap() with stale coordinates
+  // before stopBusPoller() fully unsubscribes it.
+  stopBusPoller();
   S.trackOn = false;
   BackgroundKeepAlive.stop();
   S.trackedId = null;
   S.trackAlerted = false;
   S.alertedBusPos = null;
   S.trackedBusActive = null;
-  stopBusPoller();
   if (!silent) setStatus('Idle', false);
   q('#track-alert-banner')?.classList.add('hidden');
 }
@@ -1499,12 +1517,14 @@ function startDriver(resuming = false) {
   q('#driver-btn-label').innerHTML = '🔴 &nbsp;Stop Sharing';
   setStatus('Driver Live 🟢', true);
 
-  // Save session
+  // Save session — include startedAt so loadLocal() can detect stale sessions
+  // and refuse to auto-resume a session left over from a previous testing day.
   lsSave('ba_driver_session', {
     active: true,
     profile: _driverProfile,
     busId: S.driverBusId,
-    accessCode: S.driverAccessCode
+    accessCode: S.driverAccessCode,
+    startedAt: Date.now()
   });
 
   if (!resuming) showToast(`🟢 LIVE: Bus ${num} | Student Code: ${accessCode}`);
@@ -1896,7 +1916,10 @@ function getPos(ok, fail) {
         fail(e.message || 'GPS error');
       }
     },
-    { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
+    // FIX: maximumAge: 0 forces a fresh GPS fix. With maximumAge: 10000 the
+    // browser was allowed to return a cached position from a previous session,
+    // which could be the developer's location from earlier driver-mode testing.
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
   );
 }
 
@@ -1942,7 +1965,11 @@ let _driverHeartbeat = null;
 function _startDriverHeartbeat() {
   _stopDriverHeartbeat();
   _driverHeartbeat = setInterval(() => {
-    if (!S.driverOn || SIMULATION.active) return;
+    // FIX: Double-guard with S.driverBusId to prevent a stale setInterval
+    // callback from pushing GPS coordinates after the driver session has
+    // ended. Without this, a race between clearInterval() and the next
+    // callback execution could push the developer device's location to Firebase.
+    if (!S.driverOn || !S.driverBusId || SIMULATION.active) return;
     navigator.geolocation.getCurrentPosition(
       pos => onDriverPos(pos),
       () => {}, // silent fail — watchPosition is the primary source
@@ -2224,6 +2251,22 @@ window.addEventListener('offline', () => {
   q('#offline-badge')?.classList.add('show');
   showToast('⚡ Connection lost — GPS caching locally...');
   // No need to stop the watchPosition — let it keep recording to the offline queue
+});
+
+// ─── FIX: Clear driver session on page unload ────────────────────
+// When a developer refreshes the page while in driver mode, stopDriver() is
+// never called, so ba_driver_session stays active:true in localStorage. On the
+// next load, loadLocal() sees active:true and auto-resumes GPS sharing —
+// pushing the developer's location to Firebase and overwriting the real driver.
+// This beforeunload clears the session flag synchronously before unload completes.
+window.addEventListener('beforeunload', () => {
+  if (S.driverOn) {
+    lsSave('ba_driver_session', { active: false });
+    // Best-effort: mark bus inactive so the onDisconnect() handler is not
+    // the only safety net. (Synchronous XHR on unload is unreliable, so
+    // we rely on the existing onDisconnect rule set in startDriver().)
+    console.log('🔌 Page unloading with driver active — session cleared.');
+  }
 });
 
 // NOTE: doInstall() and dismissInstall() are defined above (lines ~2085–2097).
