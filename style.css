@@ -267,7 +267,12 @@ body {
   animation: panelSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  flex-shrink: 0;
+  /* FIX: allow panel to shrink inside the flex column so it never
+     pushes content below the bottom tab bar. flex-shrink:0 was the
+     root cause — it forced the panel to demand its full natural
+     height regardless of the viewport. */
+  flex-shrink: 1;
+  min-height: 0;
 }
 
 /* Student (Sleep) panel scrollable */
@@ -276,6 +281,18 @@ body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
+}
+
+/* Driver panel scrollable — same treatment as sleep panel.
+   Extra padding-bottom leaves room for the sticky Stop button
+   so the last content card is never hidden under it. */
+#panel-driver {
+  max-height: calc(100vh - 130px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  /* Ensure content scrolls past the sticky button height (~70px) */
+  padding-bottom: 80px;
 }
 
 .panel.hidden {
@@ -657,6 +674,21 @@ body {
 .main-btn.stop-mode {
   background: var(--red) !important;
   box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3) !important;
+}
+
+/* ── Driver Go-Live / Stop button — sticky inside scrollable panel ──
+   position:sticky keeps it always visible at the bottom of the
+   driver panel regardless of how much content is above it.
+   The frosted backdrop prevents content from bleeding through
+   on older phones that don't support backdrop-filter. */
+#btn-driver {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin-top: 16px;
+  /* Frosted glass strip so content doesn't bleed under the button */
+  background-clip: padding-box;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08), 0 6px 20px rgba(16, 185, 129, 0.35);
 }
 
 /* ================================================================
@@ -1897,6 +1929,34 @@ body {
 
   .brand-name {
     font-size: 1.1rem;
+  }
+
+  /* ── Driver panel compact mode on small phones ── */
+  /* Recalculate max-height for the shorter 56px topbar on mobile */
+  #panel-driver {
+    max-height: calc(100vh - 122px); /* 56px topbar + 66px tabs row */
+    padding-bottom: 76px;            /* room for sticky Stop button */
+  }
+
+  /* Shrink the driver hero banner to save ~30px of vertical space */
+  .driver-hero {
+    padding: 14px 14px;
+    margin-bottom: 12px;
+    gap: 12px;
+  }
+
+  /* Hide the hero sub-text on tiny screens — the bus number card
+     already shows the route, so this is non-essential */
+  .driver-hero .hero-text p {
+    display: none;
+  }
+
+  /* Compact DLC stat cards */
+  .dlc-stat-val {
+    font-size: 1.2rem;
+  }
+  .dlc-stat {
+    padding: 8px 4px;
   }
 }
 
