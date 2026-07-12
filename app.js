@@ -288,14 +288,14 @@ function connectFb(cfg) {
     S.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .catch(e => console.error("Persistence Error:", e));
 
-    // Initialize the default (Student) DB
-    S.studentDb = window.firebase.firestore(); 
-
-    // Initialize the Driver DB
-    S.driverDb = window.firebase.app().firestore("driver-db");
-
-    // Initialize the Admin DB
-    S.adminDb = window.firebase.app().firestore("admin-db");
+    // ── Single Firestore for all roles (works on free Spark plan) ──
+    // All students, drivers, and admins are stored in one 'users' collection
+    // with a 'role' field. Named databases (driver-db, admin-db) required
+    // Blaze plan and were crashing login silently.
+    S.usersDb   = window.firebase.firestore();
+    S.studentDb = S.usersDb; // backward-compat alias
+    S.driverDb  = S.usersDb; // backward-compat alias
+    S.adminDb   = S.usersDb; // backward-compat alias
 
     S.fbOk = true;
     setStatus('Connected', true);
@@ -323,9 +323,7 @@ function connectFb(cfg) {
         if (!role) {
           role = localStorage.getItem('ba_pending_role') || 'student';
           const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-          if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-          else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-          else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+          await S.usersDb.collection('users').doc(user.uid).set(docData);
           showToast(`✅ Registered as ${role}`);
         }
         
@@ -381,10 +379,7 @@ function connectFb(cfg) {
           if (pendingRole) {
             S.role = pendingRole;
             const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
-            if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-            else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-            else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-              
+            await S.usersDb.collection('users').doc(user.uid).set(docData);
             localStorage.setItem('ba_cached_role', S.role);
             localStorage.removeItem('ba_pending_role');
           }
@@ -2367,51 +2362,41 @@ async function fetchAIInsight() {
   }
 }
 // ─── ROLE & AUTH LOGIC ──────────────────────────────────────────
+// ─── UNIFIED ROLE LOOKUP (single 'users' collection) ────────────
 async function getRoleByUid(uid) {
-  let doc = await S.studentDb.collection('students').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'student';
-  }
-  doc = await S.driverDb.collection('drivers').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'driver';
-  }
-  doc = await S.adminDb.collection('admins').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'admin';
+  try {
+    const doc = await S.usersDb.collection('users').doc(uid).get();
+    if (doc.exists) {
+      const data = doc.data();
+      const code = data.collegeCode || null;
+      S.collegeCode = code;
+      if (code) localStorage.setItem('ba_college_code', code);
+      return data.role || null;
+    }
+  } catch (e) {
+    console.error('getRoleByUid error:', e);
   }
   return null;
 }
 
 async function checkEmailExists(email) {
-  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  return false;
+  try {
+    const qs = await S.usersDb.collection('users').where('email', '==', email).get();
+    return !qs.empty;
+  } catch (e) {
+    console.error('checkEmailExists error:', e);
+    return false;
+  }
 }
 
 // ─── ROLE CONFLICT GUARD ─────────────────────────────────────────
-// Returns the stored role for an email across all collections, or null.
-// Used to block a user from logging in under a different role than registered.
 async function getRoleByEmail(email) {
-  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
-  if (!qs.empty) return 'student';
-  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
-  if (!qs.empty) return 'driver';
-  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
-  if (!qs.empty) return 'admin';
+  try {
+    const qs = await S.usersDb.collection('users').where('email', '==', email).get();
+    if (!qs.empty) return qs.docs[0].data().role || null;
+  } catch (e) {
+    console.error('getRoleByEmail error:', e);
+  }
   return null;
 }
 
@@ -2502,9 +2487,7 @@ async function handleAuthSubmit() {
       await user.updateProfile({ displayName: name });
       
       const docData = { name, email, role: S.selectedRole, createdAt: Date.now() };
-      if (S.selectedRole === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (S.selectedRole === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (S.selectedRole === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+      await S.usersDb.collection('users').doc(user.uid).set(docData);
 
       S.user = user;
       S.role = S.selectedRole;
@@ -2610,9 +2593,7 @@ async function loginWithGoogle() {
       if (msgEl) msgEl.textContent = 'Setting up your account...';
       const role = S.selectedRole || 'student';
       const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-      if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+      await S.usersDb.collection('users').doc(user.uid).set(docData);
       S.role = role;
     }
 
@@ -2700,8 +2681,7 @@ async function verifyCollegeCode() {
     }
     
     // ── Persist in Firestore profile (source of truth) ──
-    if (S.role === 'student') await S.studentDb.collection('students').doc(S.user.uid).update({ collegeCode: code });
-    else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(S.user.uid).update({ collegeCode: code });
+    await S.usersDb.collection('users').doc(S.user.uid).update({ collegeCode: code });
     
     // ── Cache locally so we never show this screen again ──
     S.collegeCode = code;
