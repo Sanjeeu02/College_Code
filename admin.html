@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -1460,6 +1460,9 @@
         }
 
         let db = null, auth = null, map = null, markers = {}, allBuses = {}, allProfiles = {}, selectedId = null, alertMarkers = {};
+        // ── Unified Firestore instance (single users collection) ──
+        let userDb = null;
+        // Legacy aliases kept for backward compatibility with colleges collection reads
         let studentDb = null, driverDb = null, adminDb = null;
         let currentUser = null;
         let isRegisterMode = false;
@@ -1470,27 +1473,33 @@
         function handleAuthSuccess(user) {
             currentUser = user.uid;
             localStorage.setItem('ba_admin_uid', user.uid);
-            
-            // Fetch admin profile to get collegeCode
-            adminDb.collection('admins').doc(user.uid).get().then(doc => {
+
+            // ── Fetch admin profile from unified users/{uid} collection ──────────
+            // Role was already verified in onAuthStateChanged role guard above.
+            // Here we only need the collegeCode to initialize the dashboard.
+            userDb.collection('users').doc(user.uid).get().then(doc => {
                 if (doc.exists && doc.data().collegeCode) {
                     currentCollegeCode = doc.data().collegeCode;
                     finishAdminLogin();
                 } else {
+                    // First-time admin — ask for a unique college code
                     const code = prompt("Please register a unique College Code for your institution (e.g., SRM123):");
                     if (code && code.trim()) {
                         const cleanCode = code.trim().toUpperCase().replace(/\s/g, '');
-                        studentDb.collection('colleges').doc(cleanCode).get().then(collegeDoc => {
+                        // Check if code is already taken
+                        userDb.collection('colleges').doc(cleanCode).get().then(collegeDoc => {
                             if (collegeDoc.exists) {
-                                alert("College Code already in use! Please login again and pick a different one.");
+                                alert("College Code already in use! Please choose a different one.");
                                 auth.signOut();
                             } else {
-                                studentDb.collection('colleges').doc(cleanCode).set({
+                                // Register the college code in both tables
+                                userDb.collection('colleges').doc(cleanCode).set({
                                     name: cleanCode + " College",
                                     adminUid: user.uid,
                                     createdAt: Date.now()
                                 }).then(() => {
-                                    adminDb.collection('admins').doc(user.uid).update({ collegeCode: cleanCode }).then(() => {
+                                    // Persist collegeCode back to the unified users document
+                                    userDb.collection('users').doc(user.uid).update({ collegeCode: cleanCode }).then(() => {
                                         currentCollegeCode = cleanCode;
                                         finishAdminLogin();
                                     });
@@ -1503,7 +1512,7 @@
                 }
             }).catch(e => {
                 console.error(e);
-                alert("Error checking Admin profile.");
+                alert("Error loading Admin profile.");
                 auth.signOut();
             });
         }
@@ -1539,32 +1548,32 @@
                 db = window.firebase.database();
                 auth = window.firebase.auth();
 
-                // Initialize the default (Student) DB
-                studentDb = window.firebase.firestore(); 
-
-                // Initialize the Driver DB
-                driverDb = window.firebase.app().firestore("driver-db");
-
-                // Initialize the Admin DB
-                adminDb = window.firebase.app().firestore("admin-db");
+                // ── SINGLE UNIFIED FIRESTORE ──────────────────────────────────────
+                // All users live in one collection: users/{uid} with a role field.
+                userDb = window.firebase.firestore();
+                // Legacy aliases so colleges collection reads still work
+                studentDb = userDb;
+                driverDb  = userDb;
+                adminDb   = userDb;
+                // ─────────────────────────────────────────────────────────────────
 
                 auth.onAuthStateChanged(async user => {
                     if (user) {
                         // ── ROLE GUARD ─────────────────────────────────────────────────────
-                        // Critical security check: Only users with a document in the
-                        // 'admins' Firestore collection may access this dashboard.
-                        // Any authenticated non-admin (student/driver) who navigates here
-                        // directly is immediately signed out and bounced back to login.
+                        // Queries the unified users/{uid} collection and checks that
+                        // the role field === 'admin'. Any other role (or missing doc)
+                        // means this user should NOT be here — sign them out immediately.
                         try {
-                            const adminDoc = await adminDb.collection('admins').doc(user.uid).get();
-                            if (!adminDoc.exists) {
-                                // User is authenticated but is NOT an admin — boot them out
-                                console.warn('[RoleGuard] Non-admin user attempted to access admin.html:', user.email);
+                            const userDoc = await userDb.collection('users').doc(user.uid).get();
+                            const storedRole = userDoc.exists ? userDoc.data().role : null;
+
+                            if (storedRole !== 'admin') {
+                                console.warn('[RoleGuard] Non-admin attempted admin.html. Role:', storedRole, '| Email:', user.email);
                                 await auth.signOut();
                                 window.location.href = 'index.html?unauthorized=admin';
                                 return;
                             }
-                            // User is confirmed admin — proceed to dashboard
+                            // ✅ Confirmed admin — proceed to dashboard
                             handleAuthSuccess(user);
                         } catch (e) {
                             console.error('[RoleGuard] Firestore role check failed:', e);
@@ -1962,3 +1971,4 @@
 
 
 </html>
+

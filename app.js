@@ -288,14 +288,19 @@ function connectFb(cfg) {
     S.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .catch(e => console.error("Persistence Error:", e));
 
-    // Initialize the default (Student) DB
-    S.studentDb = window.firebase.firestore(); 
+    // ── SINGLE UNIFIED FIRESTORE ──────────────────────────────────────────
+    // All users (student / driver / admin) live in one collection:
+    //   users/{uid}  →  { name, email, role, collegeCode, createdAt }
+    // This is the ONLY source of truth for role. The old 3-DB approach
+    // (studentDb/driverDb/adminDb) is replaced entirely.
+    S.userDb = window.firebase.firestore();
 
-    // Initialize the Driver DB
-    S.driverDb = window.firebase.app().firestore("driver-db");
-
-    // Initialize the Admin DB
-    S.adminDb = window.firebase.app().firestore("admin-db");
+    // Keep legacy aliases pointing at the same instance so any remaining
+    // references (e.g. colleges collection) still resolve without crashing.
+    S.studentDb = S.userDb;
+    S.driverDb  = S.userDb;
+    S.adminDb   = S.userDb;
+    // ─────────────────────────────────────────────────────────────────────
 
     S.fbOk = true;
     setStatus('Connected', true);
@@ -341,11 +346,10 @@ function connectFb(cfg) {
 
         if (!role) {
           role = pendingRoleRedirect || 'student';
+          // ── WRITE to unified users/{uid} collection ──
           const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-          if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-          else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-          else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-          showToast(`✅ Registered as ${role}`);
+          await S.userDb.collection('users').doc(user.uid).set(docData);
+          showToast(`✅ Registered as ${capitaliseRole(role)}`);
         }
         
         S.role = role;
@@ -413,10 +417,9 @@ function connectFb(cfg) {
         const pendingRole = localStorage.getItem('ba_pending_role');
         if (pendingRole) {
           S.role = pendingRole;
+          // ── WRITE to unified users/{uid} collection ──
           const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
-          if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-          else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-          else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+          await S.userDb.collection('users').doc(user.uid).set(docData);
 
           localStorage.setItem('ba_cached_role', S.role);
           localStorage.removeItem('ba_pending_role');
@@ -2418,52 +2421,63 @@ async function fetchAIInsight() {
   }
 }
 // ─── ROLE & AUTH LOGIC ──────────────────────────────────────────
+//
+// ALL user documents live in a SINGLE Firestore collection:
+//   users/{uid}  →  { name, email, role, collegeCode, createdAt }
+//
+// Role is NEVER derived from which collection the user is in.
+// It is an explicit field that must match the selected login role.
+
+/**
+ * Fetches the stored role for a UID from Firestore.
+ * Also restores S.collegeCode from the document if present.
+ * Returns 'student' | 'driver' | 'admin' | null
+ */
 async function getRoleByUid(uid) {
-  let doc = await S.studentDb.collection('students').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'student';
+  try {
+    const doc = await S.userDb.collection('users').doc(uid).get();
+    if (doc.exists) {
+      const data = doc.data();
+      const role = data.role || null;
+      const code = data.collegeCode || null;
+      S.collegeCode = code;
+      if (code) localStorage.setItem('ba_college_code', code);
+      return role;
+    }
+    return null;
+  } catch (e) {
+    console.error('[getRoleByUid] Firestore error:', e);
+    return null;
   }
-  doc = await S.driverDb.collection('drivers').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'driver';
-  }
-  doc = await S.adminDb.collection('admins').doc(uid).get();
-  if (doc.exists) {
-    const code = doc.data().collegeCode || null;
-    S.collegeCode = code;
-    if (code) localStorage.setItem('ba_college_code', code);
-    return 'admin';
-  }
-  return null;
 }
 
+/**
+ * Returns true if the email is already registered in Firestore.
+ * Used during registration to block duplicate accounts.
+ */
 async function checkEmailExists(email) {
-  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
-  if (!qs.empty) return true;
-  return false;
+  try {
+    const qs = await S.userDb.collection('users').where('email', '==', email).limit(1).get();
+    return !qs.empty;
+  } catch (e) {
+    console.error('[checkEmailExists] Firestore error:', e);
+    return false;
+  }
 }
 
-// ─── ROLE CONFLICT GUARD ─────────────────────────────────────────
-// Returns the stored role for an email across all collections, or null.
-// Used to block a user from logging in under a different role than registered.
+/**
+ * Returns the stored role for an email, or null if not found.
+ * Used to give a helpful error message on role mismatch.
+ */
 async function getRoleByEmail(email) {
-  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
-  if (!qs.empty) return 'student';
-  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
-  if (!qs.empty) return 'driver';
-  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
-  if (!qs.empty) return 'admin';
-  return null;
+  try {
+    const qs = await S.userDb.collection('users').where('email', '==', email).limit(1).get();
+    if (!qs.empty) return qs.docs[0].data().role || null;
+    return null;
+  } catch (e) {
+    console.error('[getRoleByEmail] Firestore error:', e);
+    return null;
+  }
 }
 
 // Capitalises a role name for display (e.g. 'student' → 'Student')
@@ -2523,74 +2537,103 @@ function renderAuthMode() {
 }
 
 async function handleAuthSubmit() {
-  const email = q('#auth-email').value.trim();
-  const pass = q('#auth-pass').value;
-  const name = q('#auth-user').value.trim();
+  const email   = q('#auth-email').value.trim();
+  const pass    = q('#auth-pass').value;
+  const name    = q('#auth-user').value.trim();
   const confirm = q('#auth-pass-confirm').value;
-  const err = q('#auth-err');
-  const btn = q('#auth-submit-btn');
+  const err     = q('#auth-err');
 
+  // ── Input validation ──────────────────────────────────────────────────────
   if (!email || !pass) { err.textContent = '⚠️ Enter email and password.'; return; }
   if (S.isRegisterMode) {
-    if (!name) { err.textContent = '⚠️ Enter your full name.'; return; }
-    if (pass !== confirm) { err.textContent = '❌ Passwords do not match.'; return; }
-    if (pass.length < 6) { err.textContent = '⚠️ Password too weak.'; return; }
+    if (!name)             { err.textContent = '⚠️ Enter your full name.'; return; }
+    if (pass !== confirm)  { err.textContent = '❌ Passwords do not match.'; return; }
+    if (pass.length < 6)   { err.textContent = '⚠️ Password too weak (min 6 chars).'; return; }
+    if (!S.selectedRole)   { err.textContent = '⚠️ No role selected. Go back and choose.'; return; }
   }
+  if (!S.selectedRole) { err.textContent = '⚠️ No role selected. Go back and choose.'; return; }
 
   showAuthLoading(S.isRegisterMode ? 'Creating your account...' : 'Signing you in...');
 
   try {
-    let user;
+    // ════════════════════════════════════════════════════════════════════════
+    //  REGISTRATION FLOW
+    // ════════════════════════════════════════════════════════════════════════
     if (S.isRegisterMode) {
+
+      // Block duplicate emails across ALL roles
       const exists = await checkEmailExists(email);
       if (exists) {
-        resetAuthLoading('❌ Email is already registered.');
+        resetAuthLoading('❌ Email is already registered. Please login instead.');
         return;
       }
 
+      // Step 1: Create Firebase Auth account
       const res = await S.auth.createUserWithEmailAndPassword(email, pass);
-      user = res.user;
+      const user = res.user;
       await user.updateProfile({ displayName: name });
-      
-      const docData = { name, email, role: S.selectedRole, createdAt: Date.now() };
-      if (S.selectedRole === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (S.selectedRole === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (S.selectedRole === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+
+      // Step 2: Write user document with role field to unified collection
+      await S.userDb.collection('users').doc(user.uid).set({
+        name,
+        email,
+        role:      S.selectedRole,   // ← role is explicit, not inferred from collection
+        createdAt: Date.now(),
+      });
 
       S.user = user;
       S.role = S.selectedRole;
-    } else {
-      const res = await S.auth.signInWithEmailAndPassword(email, pass);
-      user = res.user;
 
-      // ── ROLE CONFLICT CHECK ────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  LOGIN FLOW — STRICT ROLE VALIDATION
+    // ════════════════════════════════════════════════════════════════════════
+    } else {
+
+      // Step 1: Authenticate with Firebase (email + password)
+      const msgEl = q('#auth-loading-msg');
+      const res = await S.auth.signInWithEmailAndPassword(email, pass);
+      const user = res.user;
+
+      // Step 2: DO NOT redirect yet — fetch the stored role from Firestore
+      if (msgEl) msgEl.textContent = 'Verifying your role...';
       const storedRole = await getRoleByUid(user.uid);
-      if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
+
+      // Step 3: STRICT ROLE VALIDATION
+      //   - storedRole is what the DATABASE says this email is registered as
+      //   - S.selectedRole is what the user CHOSE in the UI
+      //   - They MUST match. Any mismatch = immediate block.
+      if (!storedRole) {
+        // Account exists in Firebase Auth but has no Firestore document
+        await S.auth.signOut();
+        resetAuthLoading('⚠️ Account not found in database. Please register first.');
+        return;
+      }
+
+      if (storedRole !== S.selectedRole) {
+        // ❌ ROLE MISMATCH — sign out immediately and block access
         await S.auth.signOut();
         resetAuthLoading(
           `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-          `Please login using the correct role.`
+          `Please use the <b>${capitaliseRole(storedRole)} login</b> to continue.`
         );
         return;
       }
-      // ──────────────────────────────────────────────────────────
 
+      // ✅ Roles match — access granted
       S.user = user;
       S.role = storedRole;
-      if (!S.role) {
-        resetAuthLoading('⚠️ No role found. Please register first.');
-        return;
-      }
     }
-    // Cache role + college code for instant future logins
+
+    // Cache role + college code for session restore
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
     resetAuthLoading('');
-    handleAuthSuccess(user);
+    handleAuthSuccess(S.user);
+
   } catch (e) {
-    const errorMsg = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
-      ? 'Incorrect email or password.' : e.message);
-    resetAuthLoading(errorMsg);
+    const isCredentialError = ['auth/user-not-found', 'auth/wrong-password',
+      'auth/invalid-credential', 'auth/invalid-email'].includes(e.code);
+    resetAuthLoading('❌ ' + (isCredentialError ? 'Incorrect email or password.' : e.message));
   }
 }
 
@@ -2660,10 +2703,13 @@ async function loginWithGoogle() {
     } else {
       if (msgEl) msgEl.textContent = 'Setting up your account...';
       const role = S.selectedRole || 'student';
-      const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-      if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+      // ── WRITE to unified users/{uid} collection ──
+      await S.userDb.collection('users').doc(user.uid).set({
+        name: user.displayName || user.email,
+        email: user.email,
+        role,
+        createdAt: Date.now(),
+      });
       S.role = role;
     }
 
@@ -2750,9 +2796,8 @@ async function verifyCollegeCode() {
       return;
     }
     
-    // ── Persist in Firestore profile (source of truth) ──
-    if (S.role === 'student') await S.studentDb.collection('students').doc(S.user.uid).update({ collegeCode: code });
-    else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(S.user.uid).update({ collegeCode: code });
+    // ── Persist collegeCode in unified users/{uid} document ──────────────
+    await S.userDb.collection('users').doc(S.user.uid).update({ collegeCode: code });
     
     // ── Cache locally so we never show this screen again ──
     S.collegeCode = code;
