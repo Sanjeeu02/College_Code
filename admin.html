@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -1548,11 +1548,32 @@
                 // Initialize the Admin DB
                 adminDb = window.firebase.app().firestore("admin-db");
 
-                auth.onAuthStateChanged(user => {
+                auth.onAuthStateChanged(async user => {
                     if (user) {
-                        handleAuthSuccess(user);
+                        // ── ROLE GUARD ─────────────────────────────────────────────────────
+                        // Critical security check: Only users with a document in the
+                        // 'admins' Firestore collection may access this dashboard.
+                        // Any authenticated non-admin (student/driver) who navigates here
+                        // directly is immediately signed out and bounced back to login.
+                        try {
+                            const adminDoc = await adminDb.collection('admins').doc(user.uid).get();
+                            if (!adminDoc.exists) {
+                                // User is authenticated but is NOT an admin — boot them out
+                                console.warn('[RoleGuard] Non-admin user attempted to access admin.html:', user.email);
+                                await auth.signOut();
+                                window.location.href = 'index.html?unauthorized=admin';
+                                return;
+                            }
+                            // User is confirmed admin — proceed to dashboard
+                            handleAuthSuccess(user);
+                        } catch (e) {
+                            console.error('[RoleGuard] Firestore role check failed:', e);
+                            await auth.signOut();
+                            window.location.href = 'index.html?unauthorized=admin';
+                        }
+                        // ───────────────────────────────────────────────────────────────────
                     } else {
-                        // Not logged in -> redirect to main unified auth portal
+                        // Not logged in — redirect to main unified auth portal
                         window.location.href = 'index.html';
                     }
                 });

@@ -320,8 +320,27 @@ function connectFb(cfg) {
         showToast('🌐 Google Sign-in successful!');
         
         let role = await getRoleByUid(user.uid); // also restores S.collegeCode from Firestore
+
+        // ── ROLE CONFLICT CHECK (redirect path) ──────────────────────────────
+        // If this is a RETURNING user (role already set) but they selected a
+        // different role in the UI, block the login immediately.
+        const pendingRoleRedirect = localStorage.getItem('ba_pending_role');
+        if (role && pendingRoleRedirect && role !== pendingRoleRedirect) {
+          await S.auth.signOut();
+          S.authInProgress = false;
+          _redirectResultResolve(false);
+          localStorage.removeItem('ba_pending_role');
+          showRoleScreen();
+          showToast(
+            `❌ This email is already registered as a ${capitaliseRole(role)}. ` +
+            `Please use the correct login.`
+          );
+          return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         if (!role) {
-          role = localStorage.getItem('ba_pending_role') || 'student';
+          role = pendingRoleRedirect || 'student';
           const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
           if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
           else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
@@ -361,40 +380,52 @@ function connectFb(cfg) {
         
       if (user) {
         S.user = user;
-          
-        // 1. Try Cache — restore both role AND college code instantly
+
+        // ── ROLE SECURITY: Always verify role from Firestore ─────────────────
+        // The localStorage cache speeds up UX but is NOT trusted for security.
+        // We always fetch the real role from Firestore and compare. If the
+        // cache is stale or forged, we correct it and proceed with the DB value.
         const cachedRole = localStorage.getItem('ba_cached_role');
         const cachedCollegeCode = localStorage.getItem('ba_college_code');
-        if (cachedRole) {
-          S.role = cachedRole;
-          if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
+
+        // 1. Fetch real role from Firestore (also restores S.collegeCode)
+        const verifiedRole = await getRoleByUid(user.uid);
+
+        if (verifiedRole) {
+          // If cache disagrees with Firestore, clear it and use the DB value
+          if (cachedRole && cachedRole !== verifiedRole) {
+            console.warn(`[RoleGuard] Cache mismatch: cached="${cachedRole}", actual="${verifiedRole}". Correcting.`);
+            localStorage.removeItem('ba_cached_role');
+            localStorage.removeItem('ba_college_code');
+            S.collegeCode = null;
+          } else if (cachedCollegeCode && !S.collegeCode) {
+            // Cache agrees — restore college code from cache for speed
+            S.collegeCode = cachedCollegeCode;
+          }
+          S.role = verifiedRole;
+          localStorage.setItem('ba_cached_role', verifiedRole);
+          handleAuthSuccess(user);
+          return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        // 2. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
+        const pendingRole = localStorage.getItem('ba_pending_role');
+        if (pendingRole) {
+          S.role = pendingRole;
+          const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
+          if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+          else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+          else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+
+          localStorage.setItem('ba_cached_role', S.role);
+          localStorage.removeItem('ba_pending_role');
           handleAuthSuccess(user);
           return;
         }
 
-        // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
-        S.role = await getRoleByUid(user.uid);
-          
-        // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
-        if (!S.role) {
-          const pendingRole = localStorage.getItem('ba_pending_role');
-          if (pendingRole) {
-            S.role = pendingRole;
-            const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
-            if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-            else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-            else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-              
-            localStorage.setItem('ba_cached_role', S.role);
-            localStorage.removeItem('ba_pending_role');
-          }
-        }
-
-        if (S.role) {
-          handleAuthSuccess(user);
-        } else {
-          showRoleScreen();
-        }
+        // 3. No role found anywhere — show role selection screen
+        showRoleScreen();
       } else {
         // User logged out — only clear cache if not mid-auth
         if (!S.authInProgress) {
@@ -417,6 +448,26 @@ function connectFb(cfg) {
         setStatus('Reconnecting…', false);
       }
     });
+
+    // ── UNAUTHORIZED REDIRECT HANDLER ─────────────────────────────────────
+    // When admin.html (or any guarded page) boots a user, it redirects to
+    // index.html?unauthorized=<role>. We detect this here and show a clear
+    // error toast so the user understands why they were redirected.
+    const _urlParams = new URLSearchParams(window.location.search);
+    const _unauthRole = _urlParams.get('unauthorized');
+    if (_unauthRole) {
+      // Defer the toast so the role screen has time to render first
+      setTimeout(() => {
+        showToast(
+          `⛔ Unauthorized: You are not a ${capitaliseRole(_unauthRole)}. ` +
+          `Please log in with the correct role.`
+        );
+      }, 800);
+      // Remove the param from the URL so refresh doesn't re-show it
+      history.replaceState({}, '', window.location.pathname);
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
   } catch (e) { showToast('❌ Firebase: ' + e.message); }
 }
 
