@@ -1,0 +1,85 @@
+/**
+ * Compute the available pixel height for the map, based on actual
+ * DOM measurements of the header and tab bar. Falls back to
+ * sensible defaults so the map always gets a non-zero height.
+ */
+function _getMapHeight() {
+  const topbarEl = document.querySelector('.topbar');
+  const tabsEl   = document.querySelector('.tabs');
+
+  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
+
+  let tabsH = 88; // fallback
+  if (tabsEl) {
+    const r = tabsEl.getBoundingClientRect();
+    const style = getComputedStyle(tabsEl);
+    tabsH = r.height
+      + (parseFloat(style.marginTop)    || 0)
+      + (parseFloat(style.marginBottom) || 0);
+  }
+
+  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+}
+
+/**
+ * Compute the available pixel height for the map, based on actual
+ * DOM measurements of the header and tab bar. Falls back to
+ * sensible defaults so the map always gets a non-zero height.
+ */
+function _getMapHeight() {
+  const topbarEl = document.querySelector('.topbar');
+  const tabsEl   = document.querySelector('.tabs');
+
+  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
+
+  let tabsH = 88; // fallback
+  if (tabsEl) {
+    const r = tabsEl.getBoundingClientRect();
+    const style = getComputedStyle(tabsEl);
+    tabsH = r.height
+      + (parseFloat(style.marginTop)    || 0)
+      + (parseFloat(style.marginBottom) || 0);
+  }
+
+  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+}
+
+// Smoothly animate marker between coordinates
+function animateMarker(marker, endLat, endLon, duration = 800) {
+  if (!marker) return;
+  const start = marker.getLatLng();
+  if (start.lat === endLat && start.lng === endLon) return;
+
+  const startTime = performance.now();
+  
+  function step(timestamp) {
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Ease out quad
+    const ease = progress * (2 - progress);
+    
+    const curLat = start.lat + (endLat - start.lat) * ease;
+    const curLng = start.lng + (endLon - start.lng) * ease;
+    
+    marker.setLatLng([curLat, curLng]);
+    
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function moveBusOnMap(lat, lon) {
+  if (!S.map) return;
+  const ic = L.divIcon({ className: 'custom-div-icon', html: '<div class="map-bus-icon">🚌</div>', iconSize: [40, 40], iconAnchor: [20, 20] });
+  if (!S.busMarker) {
+    S.busMarker = L.marker([lat, lon], { icon: ic }).addTo(S.map);
+    S.map.setView([lat, lon], 16, { animate: true });
+  } else {
+    // Use smooth interpolation instead of jumping
+    animateMarker(S.busMarker, lat, lon);
+  }
+  drawRouteToStop(lat, lon);
+}

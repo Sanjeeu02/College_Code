@@ -17,7 +17,6 @@ const S = {
   trackOn: false, trackedId: null, trackAlerted: false,
   stopLoc: null, allBuses: {},
   alertedBusPos: null,  // lat/lon where the alert fired (for 1km auto-stop)
-  trackedBusActive: null,
 
   // Driver
   driverOn: false, driverWid: null, driverBusId: null, driverUpdates: 0,
@@ -39,7 +38,6 @@ const S = {
 
   // Auth & Role
   auth: null, user: null, role: null, isRegisterMode: false, selectedRole: null, collegeCode: null,
-  authInProgress: false, // prevents onAuthStateChanged from racing popup/redirect flow
 };
 
 // ─── BUS POLLER (backup for Firebase listener) ──────────────────
@@ -235,27 +233,14 @@ function loadLocal() {
   const sr = lsGet('ba_sr'); if (sr) { q('#sleep-radius').value = sr; updateRadius('sleep'); }
   const tr = lsGet('ba_tr'); if (tr) { q('#track-radius').value = tr; updateRadius('track'); }
 
-  // Restore driver session — only if it was started within the last 4 hours.
-  // ── PRIMARY FIX for the "location switches to developer device" bug ──
-  // Without this check, a stale ba_driver_session from earlier testing sets
-  // S.driverOn=true on the developer's device, starts the GPS heartbeat, and
-  // pushes the developer's coordinates to Firebase, overwriting the real
-  // driver's location on the student's map.
-  const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+  // Restore driver session
   const ds = ls('ba_driver_session');
-  const sessionIsValid = ds && ds.active && ds.startedAt &&
-    (Date.now() - ds.startedAt < SESSION_MAX_AGE_MS);
-  if (sessionIsValid) {
+  if (ds && ds.active) {
     _driverProfile = ds.profile;
     S.driverBusId = ds.busId;
     S.driverAccessCode = ds.accessCode;
     S.driverOn = true;
     startDriver(true); // true means resuming
-  } else if (ds && ds.active) {
-    // Session exists but is stale or has no startedAt timestamp — clear it
-    // so it cannot auto-resume and pollute Firebase with developer-device GPS.
-    lsSave('ba_driver_session', { active: false });
-    console.warn('🕐 Stale driver session cleared — not auto-resuming.');
   }
 }
 
@@ -301,20 +286,11 @@ function connectFb(cfg) {
     setStatus('Connected', true);
 
     // ⚡ Unified Auth Handler (Handles both normal load and redirects)
-    // FIX: Use a Promise-based flag so onAuthStateChanged can reliably await
-    // getRedirectResult completion before deciding what to do.
-    let _redirectResultResolve;
-    const _redirectResultPromise = new Promise(res => { _redirectResultResolve = res; });
-    // NOTE: S.authInProgress is defined on the global S object so loginWithGoogle()
-    // (a separate global function) can also set/read it without a ReferenceError.
-    S.authInProgress = false;
+    let redirectHandled = false;
 
     S.auth.getRedirectResult().then(async result => {
       if (result && result.user) {
-        // FIX: Mark redirect as handled IMMEDIATELY (before any async awaits)
-        // so the onAuthStateChanged guard below sees it right away.
-        _redirectResultResolve(true);
-        S.authInProgress = true;
+        redirectHandled = true;
         const user = result.user;
         S.user = user;
         showToast('🌐 Google Sign-in successful!');
@@ -333,14 +309,9 @@ function connectFb(cfg) {
         localStorage.setItem('ba_cached_role', S.role);
         if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
         localStorage.removeItem('ba_pending_role');
-        S.authInProgress = false;
         handleAuthSuccess(user);
-      } else {
-        // No redirect result — signal onAuthStateChanged it's safe to proceed
-        _redirectResultResolve(false);
       }
     }).catch(e => {
-      _redirectResultResolve(false); // unblock onAuthStateChanged on error too
       console.error("Redirect Auth Error:", e);
       if (e.code === 'auth/unauthorized-domain') {
         const d = window.location.hostname;
@@ -351,58 +322,52 @@ function connectFb(cfg) {
     });
 
     S.auth.onAuthStateChanged(async user => {
-      // FIX: Wait for getRedirectResult to finish before doing anything.
-      // This eliminates the 800ms blind setTimeout and the race condition.
-      const wasRedirect = await _redirectResultPromise;
-      if (wasRedirect) return; // redirect flow already handled everything
-      if (S.authInProgress) return; // popup flow is mid-flight, let it finish
-      // FIX: Guard on BOTH S.user AND S.role being set — not just one.
-      if (S.user && S.role) return;
+      setTimeout(async () => {
+        if (redirectHandled) return;
+        if (S.user && S.role) return;
         
-      if (user) {
-        S.user = user;
+        if (user) {
+          S.user = user;
           
-        // 1. Try Cache — restore both role AND college code instantly
-        const cachedRole = localStorage.getItem('ba_cached_role');
-        const cachedCollegeCode = localStorage.getItem('ba_college_code');
-        if (cachedRole) {
-          S.role = cachedRole;
-          if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
-          handleAuthSuccess(user);
-          return;
-        }
-
-        // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
-        S.role = await getRoleByUid(user.uid);
-          
-        // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
-        if (!S.role) {
-          const pendingRole = localStorage.getItem('ba_pending_role');
-          if (pendingRole) {
-            S.role = pendingRole;
-            const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
-            if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-            else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-            else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-              
-            localStorage.setItem('ba_cached_role', S.role);
-            localStorage.removeItem('ba_pending_role');
+          // 1. Try Cache — restore both role AND college code instantly
+          const cachedRole = localStorage.getItem('ba_cached_role');
+          const cachedCollegeCode = localStorage.getItem('ba_college_code');
+          if (cachedRole) {
+            S.role = cachedRole;
+            if (cachedCollegeCode) S.collegeCode = cachedCollegeCode;
+            handleAuthSuccess(user);
+            return;
           }
-        }
 
-        if (S.role) {
-          handleAuthSuccess(user);
+          // 2. Try DB (first time on this device — fetches role + collegeCode from Firestore)
+          S.role = await getRoleByUid(user.uid);
+          
+          // 3. Fallback: Check if we were in the middle of a Google Redirect for a NEW user
+          if (!S.role) {
+            const pendingRole = localStorage.getItem('ba_pending_role');
+            if (pendingRole) {
+              S.role = pendingRole;
+              const docData = { name: user.displayName || user.email, email: user.email, role: S.role, createdAt: Date.now() };
+              if (S.role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+              else if (S.role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+              else if (S.role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+              
+              localStorage.setItem('ba_cached_role', S.role);
+              localStorage.removeItem('ba_pending_role');
+            }
+          }
+
+          if (S.role) {
+            handleAuthSuccess(user);
+          } else {
+            showRoleScreen();
+          }
         } else {
-          showRoleScreen();
-        }
-      } else {
-        // User logged out — only clear cache if not mid-auth
-        if (!S.authInProgress) {
           localStorage.removeItem('ba_cached_role');
           localStorage.removeItem('ba_college_code');
           showRoleScreen();
         }
-      }
+      }, 800); // Slightly longer delay to ensure Firestore is ready
     });
 
     // NOTE: startBusListener() is called in handleAuthSuccess() AFTER
@@ -430,67 +395,31 @@ function startBusListener() {
 }
 
 function _handleBusUpdate() {
-  // ── NOTE: Map position updates (moveBusOnMap / updateTrackInfo) are handled
-  // exclusively by startBusPoller which listens to the faster /location child
-  // node. Duplicating those calls here (on the parent /buses listener) caused
-  // every GPS tick to fire the update twice. This function now only owns:
-  //   1. The active / offline state-transition badge & hint
-  //   2. Refreshing the bus search list
+  // update tracked bus on map
+  if (S.trackOn && S.trackedId && S.allBuses[S.trackedId]?.location) {
+    const loc = S.allBuses[S.trackedId].location;
+    if (loc.lat && loc.lon) {
+      moveBusOnMap(loc.lat, loc.lon);
+      updateTrackInfo(loc);
+    }
+  }
 
-  // ── Active / Offline state machine ──────────────────────────────
+  // Check if tracked bus went offline
   if (S.trackOn && S.trackedId) {
     const b = S.allBuses[S.trackedId];
-    const isActive = !!(b && b.active);
-
-    if (S.trackedBusActive !== isActive) {
-      // ── State CHANGED (online ↔ offline) ── fire toast exactly once ──
-      S.trackedBusActive = isActive;
-
-      if (!isActive) {
-        // Driver went OFFLINE
-        showToast('ℹ️ Driver ended the trip.');
-        _applyOfflineBadge();
-      } else {
-        // Driver came back ONLINE
-        showToast('🌐 Driver is back online!');
-        _applyOnlineBadge();
+    if (!b || !b.active) {
+      showToast('ℹ️ Driver ended the trip.');
+    } else if (b.location) {
+      const age = Date.now() - (b.location.timestamp || 0);
+      if (age > 5 * 60 * 1000) {
+        q('#map-status-hint').textContent = '⚠️ Bus GPS signal lost (5+ min old)';
       }
-    } else if (!isActive) {
-      // Already offline — re-apply styling in case DOM was rebuilt
-      _applyOfflineBadge();
     }
-    // When online, the badge / hint are managed by startBusPoller which has
-    // the freshest timestamp — don't overwrite it from the stale parent snap.
   }
 
-  // ── Refresh bus search list if the search box has a query ───────
+  // refresh search list if open
   const q2 = q('#route-search')?.value?.trim();
   if (q2 && q2.length > 0) renderBusList(q2);
-}
-
-// ── Badge helpers (single source of truth for styling) ───────────
-function _applyOfflineBadge() {
-  const hint  = q('#map-status-hint');
-  const badge = q('.live-dot-badge');
-  if (hint)  { hint.textContent = '🔴 Driver is Offline (Trip Ended)'; hint.style.color = 'var(--red)'; }
-  if (badge) {
-    badge.innerHTML     = '🔴 OFFLINE';
-    badge.style.background  = 'rgba(107, 114, 128, 0.2)';
-    badge.style.color       = '#6b7280';
-    badge.style.borderColor = '#d1d5db';
-  }
-}
-
-function _applyOnlineBadge(statusText) {
-  const hint  = q('#map-status-hint');
-  const badge = q('.live-dot-badge');
-  if (hint)  { hint.textContent = statusText || '📡 Live Tracking'; hint.style.color = 'var(--green)'; }
-  if (badge) {
-    badge.innerHTML     = '<div class="live-dot-anim"></div> LIVE';
-    badge.style.background  = '';
-    badge.style.color       = '';
-    badge.style.borderColor = '';
-  }
 }
 
 // ─── TAB SWITCH ──────────────────────────────────────────────────
@@ -501,14 +430,7 @@ function switchTab(tab) {
     q(`#tab-${t}`).classList.toggle('active', t === tab);
   });
   if (tab === 'find') {
-    // Only initialize map if tracking is active AND map doesn't exist AND map-view is actually visible
-    const mapView = q('#map-view');
-    const isMapViewVisible = mapView && window.getComputedStyle(mapView).display !== 'none' && !mapView.classList.contains('hidden');
-    
-    if (S.trackOn && !S.map && isMapViewVisible) {
-      console.log('🗺️ switchTab: calling initMap because map-view is visible');
-      initMap();
-    }
+    if (S.trackOn && !S.map) initMap();
     if (S.trackOn && S.map) {
       setTimeout(() => S.map.invalidateSize(), 100);
       setTimeout(() => S.map.invalidateSize(), 400);
@@ -692,20 +614,9 @@ function _doStartTracking(busId) {
   if (S.trackOn) stopTrackingInner(true);
 
   S.trackOn = true;
-  BackgroundKeepAlive.start();
   S.trackAlerted = false;
   S.trackedId = busId;
   S.alertedBusPos = null;
-  S.trackedBusActive = true;
-
-  // Reset live badge to default LIVE state
-  const badge = q('.live-dot-badge');
-  if (badge) {
-    badge.innerHTML = '<div class="live-dot-anim"></div> LIVE';
-    badge.style.background = '';
-    badge.style.color = '';
-    badge.style.borderColor = '';
-  }
 
   const bus = S.allBuses[busId] || {};
   setStatus('Tracking Bus', true);
@@ -721,19 +632,13 @@ function _doStartTracking(busId) {
     if (S.routeControl) { S.routeControl = null; }
   }
 
-  // Show the map view FIRST so the container is in the DOM and visible BEFORE switching tabs
+  // Show the map view FIRST so the container is in the DOM and visible
   showMapView();
-  console.log('✅ Called showMapView()');
-
-  // CRITICAL: Switch to 'find' tab AFTER showing map (so switchTab's initMap check works properly)
-  switchTab('find');
-  console.log('📋 Switched to find tab');
 
   // Use double requestAnimationFrame to guarantee the browser has painted
   // the visible #map-view before Leaflet measures anything
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      console.log('🎯 Double RAF trigger for initMap');
       initMap();
 
       // Immediately place bus marker if location exists
@@ -763,40 +668,29 @@ function startBusPoller(busId) {
   
   const busRef = S.db.ref(`colleges/${S.collegeCode}/buses/${busId}/location`);
   
-  // Real-time listener for ultra-low latency location updates
+  // Real-time listener for ultra-low latency updates
   busRef.on('value', snap => {
     if (!S.trackOn || S.trackedId !== busId) { stopBusPoller(); return; }
+    
+    // Clear the timeout that shows "Signal Lost"
+    if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
+    q('#map-status-hint').textContent = '📡 Live Tracking';
+    q('#map-status-hint').style.color = 'var(--green)';
 
     const loc = snap.val();
-
-    // ── BUG FIX: Only treat a snap as "live" when it has real coordinates.
-    // Previously, setting hint/badge to green happened unconditionally, which
-    // overwrote the 🔴 OFFLINE state set by _handleBusUpdate every time the
-    // location node was null (driver ended trip / node deleted).
     if (loc && loc.lat && loc.lon) {
-      // Valid location received — update map and restore live indicator
       if (S.allBuses[busId]) S.allBuses[busId].location = loc;
       moveBusOnMap(loc.lat, loc.lon);
       updateTrackInfo(loc);
-
-      // Only restore the online badge if we are NOT already showing offline
-      // (i.e. the parent /buses listener hasn't flagged the bus as inactive)
-      if (S.trackedBusActive !== false) {
-        _applyOnlineBadge('📡 Live Tracking');
-      }
-
-      // Reset the stale-signal timer
-      if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
-      _studentGpsTimeout = setTimeout(() => {
-        // Only show stale warning if still online (not already offline)
-        if (S.trackOn && S.trackedBusActive !== false) {
-          const hint = q('#map-status-hint');
-          if (hint) { hint.textContent = '⚠️ GPS Signal Lost - Showing Last Known Location'; hint.style.color = '#f59e0b'; }
-        }
-      }, 15000);
     }
-    // If loc is null: driver deleted / cleared location. Do nothing here —
-    // _handleBusUpdate on the parent listener owns the offline badge transition.
+
+    // Set a fallback timeout if driver loses signal
+    _studentGpsTimeout = setTimeout(() => {
+      if (S.trackOn) {
+        q('#map-status-hint').textContent = '⚠️ GPS Signal Lost - Showing Last Known Location';
+        q('#map-status-hint').style.color = '#f59e0b';
+      }
+    }, 15000); // 15 seconds without an update
   });
   
   // Store the ref so we can turn off the listener later
@@ -849,18 +743,11 @@ function stopTracking() {
 }
 
 function stopTrackingInner(silent) {
-  // FIX: Stop the Firebase listener FIRST before clearing S.trackedId.
-  // If we clear trackedId first, the listener's internal guard
-  // (S.trackedId !== busId) becomes true immediately and the listener
-  // may fire one final time and call moveBusOnMap() with stale coordinates
-  // before stopBusPoller() fully unsubscribes it.
-  stopBusPoller();
   S.trackOn = false;
-  BackgroundKeepAlive.stop();
   S.trackedId = null;
   S.trackAlerted = false;
   S.alertedBusPos = null;
-  S.trackedBusActive = null;
+  stopBusPoller();
   if (!silent) setStatus('Idle', false);
   q('#track-alert-banner')?.classList.add('hidden');
 }
@@ -889,91 +776,93 @@ function _getMapHeight() {
 
   return Math.max(window.innerHeight - topbarH - tabsH, 300);
 }
-// Helper: load an external script dynamically (returns a Promise)
-function _loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = false;
-    s.onload = () => resolve();
-    s.onerror = (e) => reject(new Error('Failed to load ' + src));
-    document.head.appendChild(s);
-  });
-}
 
-// Ensure Leaflet is available; if not, try to load it dynamically.
-function ensureLeafletLoaded(cb) {
-  if (window.L) { if (cb) cb(); return; }
-  console.warn('Leaflet not present — loading dynamically');
-  _loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
-    .then(() => { console.log('Leaflet loaded dynamically'); if (cb) cb(); })
-    .catch(err => { console.error('Leaflet load failed', err); showToast('❌ Map library failed to load. Check network.'); });
-}
+/**
+ * Compute the available pixel height for the map, based on actual
+ * DOM measurements of the header and tab bar. Falls back to
+ * sensible defaults so the map always gets a non-zero height.
+ */
+function _getMapHeight() {
+  const topbarEl = document.querySelector('.topbar');
+  const tabsEl   = document.querySelector('.tabs');
 
-// Smoothly animate marker between coordinates (from/to form)
-let _animFrame = null;
-function animateMarker(marker, from, to, durationMs = 800) {
-  if (!marker || !from || !to) return;
-  if (from.lat === to.lat && from.lng === to.lng) return;
-  if (_animFrame) cancelAnimationFrame(_animFrame);
-  const startTime = performance.now();
-  function frame(now) {
-    const t = Math.min((now - startTime) / durationMs, 1);
-    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-    const lat = from.lat + (to.lat - from.lat) * ease;
-    const lng = from.lng + (to.lng - from.lng) * ease;
-    marker.setLatLng([lat, lng]);
-    if (t < 1) _animFrame = requestAnimationFrame(frame);
-    else { marker.setLatLng(to); _animFrame = null; }
+  const topbarH = topbarEl ? topbarEl.getBoundingClientRect().height : 60;
+
+  let tabsH = 88; // fallback
+  if (tabsEl) {
+    const r = tabsEl.getBoundingClientRect();
+    const style = getComputedStyle(tabsEl);
+    tabsH = r.height
+      + (parseFloat(style.marginTop)    || 0)
+      + (parseFloat(style.marginBottom) || 0);
   }
-  _animFrame = requestAnimationFrame(frame);
+
+  return Math.max(window.innerHeight - topbarH - tabsH, 300);
+}
+
+// Smoothly animate marker between coordinates
+function animateMarker(marker, endLat, endLon, duration = 800) {
+  if (!marker) return;
+  const start = marker.getLatLng();
+  if (start.lat === endLat && start.lng === endLon) return;
+
+  const startTime = performance.now();
+  
+  function step(timestamp) {
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Ease out quad
+    const ease = progress * (2 - progress);
+    
+    const curLat = start.lat + (endLat - start.lat) * ease;
+    const curLng = start.lng + (endLon - start.lng) * ease;
+    
+    marker.setLatLng([curLat, curLng]);
+    
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function moveBusOnMap(lat, lon) {
+  if (!S.map) return;
+  const ic = L.divIcon({ className: 'custom-div-icon', html: '<div class="map-bus-icon">🚌</div>', iconSize: [40, 40], iconAnchor: [20, 20] });
+  if (!S.busMarker) {
+    S.busMarker = L.marker([lat, lon], { icon: ic }).addTo(S.map);
+    S.map.setView([lat, lon], 16, { animate: true });
+  } else {
+    // Use smooth interpolation instead of jumping
+    animateMarker(S.busMarker, lat, lon);
+  }
+  drawRouteToStop(lat, lon);
 }
 
 function initMap() {
-  if (S.map) {
-    console.warn('ℹ️ Map already initialized, skipping');
-    return;
-  }
-  // If Leaflet library hasn't loaded for any reason, try to load it
-  if (typeof L === 'undefined') {
-    ensureLeafletLoaded(() => { initMap(); });
-    return;
-  }
-  
+  if (S.map) return;
   const mapEl   = document.getElementById('live-map');
   const mapView = document.getElementById('map-view');
+  if (!mapEl) { console.error('initMap: #live-map not found'); return; }
 
-  if (!mapEl) { console.error('❌ FATAL: #live-map not found!'); return; }
-
-  // Clear any stale inline overrides that could fight the CSS flex chain
-  mapView && (mapView.style.cssText = '');
-  mapEl.style.cssText = '';
-
-  // Force a reflow so the browser can measure the flex-sized container
-  void mapEl.offsetHeight;
-
-  // Fallback: if CSS flex chain gave us 0 height, set a minimum
-  if (mapEl.clientHeight < 50) {
-    const mapH = _getMapHeight();
-    if (mapView) { mapView.style.height = mapH + 'px'; }
-    mapEl.style.height = mapH + 'px';
-    mapEl.style.minHeight = '300px';
-    void mapEl.offsetHeight;
+  // ── Force explicit pixel height — never trust the CSS flex chain ──
+  const mapH = _getMapHeight();
+  if (mapView) {
+    mapView.style.height   = mapH + 'px';
+    mapView.style.minHeight = '300px';
   }
+  mapEl.style.width     = '100%';
+  mapEl.style.height    = mapH + 'px';
+  mapEl.style.minHeight = '300px';
 
-  try {
-    S.map = L.map('live-map', { zoomControl: true, attributionControl: false })
-             .setView([12.9716, 77.5946], 13);
+  S.map = L.map('live-map', { zoomControl: true, attributionControl: false })
+           .setView([12.9716, 77.5946], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 })
+   .addTo(S.map);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 })
-     .addTo(S.map);
-  } catch (err) {
-    console.error('❌ Failed to initialize Leaflet map:', err);
-    return;
-  }
-
-  // Staggered invalidateSize — guards against layout thrashing and late reflows
-  [50, 200, 500, 1000, 2000].forEach(ms =>
+  // Staggered invalidateSize to handle any residual CSS reflow
+  [50, 150, 400, 800, 1500].forEach(ms =>
     setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
   );
 }
@@ -1026,6 +915,22 @@ function moveBusOnMap(lat, lon) {
 
   updateRoutePolyline();
 }
+
+let _animFrame = null;
+function animateMarker(marker, from, to, durationMs) {
+  if (_animFrame) cancelAnimationFrame(_animFrame);
+  const startTime = performance.now();
+  function frame(now) {
+    const t = Math.min((now - startTime) / durationMs, 1);
+    const lat = from.lat + (to.lat - from.lat) * easeInOut(t);
+    const lon = from.lng + (to.lng - from.lng) * easeInOut(t);
+    marker.setLatLng([lat, lon]);
+    if (t < 1) _animFrame = requestAnimationFrame(frame);
+    else { marker.setLatLng(to); _animFrame = null; }
+  }
+  _animFrame = requestAnimationFrame(frame);
+}
+function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
 
 function drawStopMarker(lat, lon) {
   if (!S.map) return;
@@ -1081,38 +986,26 @@ function updateRoutePolyline() {
 function showMapView() {
   const codeEntry = q('#code-entry-view');
   const mapView   = q('#map-view');
-  const panelFind = q('#panel-find');
 
-  // Hide the search/code-entry view
   if (codeEntry) codeEntry.classList.add('hidden');
+  if (!mapView)  return;
 
-  if (!mapView) { console.error('❌ #map-view not found!'); return; }
-
-  // -- Step 1: Ensure #panel-find is visible and the active tab panel --
-  if (panelFind) {
-    panelFind.classList.remove('hidden');
-    panelFind.classList.add('active');
-    // Remove inline style overrides that fight the CSS flex chain
-    panelFind.style.cssText = '';
-  }
-
-  // -- Step 2: Show the map view, let CSS flex do the sizing --
   mapView.classList.remove('hidden');
-  // Remove any stale inline styles so CSS takes over
-  mapView.style.cssText = '';
+
+  // Pre-size the map view so Leaflet always gets a non-zero container
+  const mapH = _getMapHeight();
+  mapView.style.height    = mapH + 'px';
+  mapView.style.minHeight = '300px';
 
   const mapEl = q('#live-map');
   if (mapEl) {
-    // Clear stale inline overrides; CSS flex:1 will size it
-    mapEl.style.cssText = '';
+    mapEl.style.width     = '100%';
+    mapEl.style.height    = mapH + 'px';
+    mapEl.style.minHeight = '300px';
   }
 
-  // -- Step 3: Force a reflow so the browser lays out BEFORE Leaflet measures --
-  void mapView.offsetHeight;
-
-  // -- Step 4: Tell Leaflet to recalculate its size multiple times --
-  // (handles both fast and slow reflow situations)
-  [100, 300, 600, 1200].forEach(ms =>
+  // invalidateSize fires AFTER initMap() has been called (map might not exist yet here)
+  [400, 800, 1400].forEach(ms =>
     setTimeout(() => { if (S.map) S.map.invalidateSize(true); }, ms)
   );
 }
@@ -1320,7 +1213,6 @@ function toggleSleepMode() {
 function startSleep() {
   if (!S.home) { showToast('⚠️ Set home location first!'); return; }
   S.sleepOn = true; S.sleptAlert = false;
-  BackgroundKeepAlive.start();
   q('#btn-sleep').classList.add('stop-mode');
   q('#sleep-btn-label').innerHTML = '⏹ &nbsp;Stop Sleep Mode';
   q('#sleep-meter').classList.remove('hidden');
@@ -1363,7 +1255,6 @@ function startRobustSleepWatch() {
 
 function stopSleep() {
   S.sleepOn = false;
-  BackgroundKeepAlive.stop();
   clearTimeout(S.geoWatchTimer);
   if (S.sleepWid !== null) { navigator.geolocation.clearWatch(S.sleepWid); S.sleepWid = null; }
   releaseWakeLock();
@@ -1500,14 +1391,7 @@ function startDriver(resuming = false) {
   }
   S.driverUpdates = 0;
 
-  // ── BUG FIX: Clear offline GPS queue from any PREVIOUS trip.
-  // Without this, coming back online after a trip would re-push stale
-  // coordinates from the last session, snapping the marker to old location.
-  _offlineGpsQueue = [];
-  localStorage.setItem('ba_offline_gps', '[]');
-
   S.driverOn = true;
-  BackgroundKeepAlive.start();
   q('#driver-login-view').classList.add('hidden');
   q('#driver-live-card').classList.remove('hidden');
   q('#dlc-busnum').textContent = 'Bus ' + num;
@@ -1517,14 +1401,12 @@ function startDriver(resuming = false) {
   q('#driver-btn-label').innerHTML = '🔴 &nbsp;Stop Sharing';
   setStatus('Driver Live 🟢', true);
 
-  // Save session — include startedAt so loadLocal() can detect stale sessions
-  // and refuse to auto-resume a session left over from a previous testing day.
+  // Save session
   lsSave('ba_driver_session', {
     active: true,
     profile: _driverProfile,
     busId: S.driverBusId,
-    accessCode: S.driverAccessCode,
-    startedAt: Date.now()
+    accessCode: S.driverAccessCode
   });
 
   if (!resuming) showToast(`🟢 LIVE: Bus ${num} | Student Code: ${accessCode}`);
@@ -1572,8 +1454,6 @@ function startRobustDriverWatch() {
     );
   }
   doWatch();
-  // Start heartbeat backup so GPS keeps firing even when app is backgrounded
-  _startDriverHeartbeat();
 }
 
 // ─── AI SCENARIO SIMULATION ENGINE ──────────────────────────────
@@ -1687,9 +1567,7 @@ function pushSimulatedLocation(mph) {
 
 function stopDriver() {
   S.driverOn = false;
-  BackgroundKeepAlive.stop();
   stopAiSimulationLoop();
-  _stopDriverHeartbeat(); // stop background GPS heartbeat
   releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
@@ -1731,27 +1609,12 @@ window.addEventListener('online', () => {
   }
 });
 
-// GPS_ACCURACY_THRESHOLD: reject fixes worse than this (meters).
-// 100m is generous — real live-tracking needs at least this quality.
-const GPS_ACCURACY_THRESHOLD = 100;
-
 function onDriverPos(pos) {
   if (!S.driverOn) return;
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
   
-  // ── BUG FIX 1: Validate coordinates (null / 0,0 island guard) ──
+  // Validation: prevent null or 0,0 island coordinates
   if (!lat || !lon || (lat === 0 && lon === 0)) return;
-
-  // ── BUG FIX 2: Accuracy filter — skip low-quality first GPS fixes ──
-  // The browser's GPS often delivers a wildly inaccurate position (100–5000m off)
-  // for the first 1–3 seconds while the hardware locks on. Pushing those to
-  // Firebase is what caused the "wrong location" symptom on the student map.
-  if (accuracy > GPS_ACCURACY_THRESHOLD) {
-    console.warn(`⚠️ GPS fix rejected (accuracy ${Math.round(accuracy)}m > ${GPS_ACCURACY_THRESHOLD}m threshold). Waiting for better signal.`);
-    // Show a non-blocking warning in the driver UI
-    q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ⚠️';
-    return; // Do NOT push to Firebase
-  }
   
   const now = Date.now();
 
@@ -1765,7 +1628,7 @@ function onDriverPos(pos) {
 
   S.driverUpdates++;
   q('#dlc-updates').textContent = S.driverUpdates;
-  q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ✅';
+  q('#dlc-accuracy').textContent = Math.round(accuracy);
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   
@@ -1916,10 +1779,7 @@ function getPos(ok, fail) {
         fail(e.message || 'GPS error');
       }
     },
-    // FIX: maximumAge: 0 forces a fresh GPS fix. With maximumAge: 10000 the
-    // browser was allowed to return a cached position from a previous session,
-    // which could be the developer's location from earlier driver-mode testing.
-    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
   );
 }
 
@@ -1956,104 +1816,12 @@ function releaseWakeLock() {
   }
 }
 
-// ── BACKGROUND GPS HEARTBEAT ──────────────────────────────
-// When a mobile browser is backgrounded, watchPosition can go dormant.
-// This heartbeat fires getCurrentPosition every 25s as a guaranteed fallback
-// so the driver's location keeps updating even with the app minimized.
-let _driverHeartbeat = null;
-
-function _startDriverHeartbeat() {
-  _stopDriverHeartbeat();
-  _driverHeartbeat = setInterval(() => {
-    // FIX: Double-guard with S.driverBusId to prevent a stale setInterval
-    // callback from pushing GPS coordinates after the driver session has
-    // ended. Without this, a race between clearInterval() and the next
-    // callback execution could push the developer device's location to Firebase.
-    if (!S.driverOn || !S.driverBusId || SIMULATION.active) return;
-    navigator.geolocation.getCurrentPosition(
-      pos => onDriverPos(pos),
-      () => {}, // silent fail — watchPosition is the primary source
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
-  }, 25000); // every 25 seconds
-}
-
-function _stopDriverHeartbeat() {
-  if (_driverHeartbeat) { clearInterval(_driverHeartbeat); _driverHeartbeat = null; }
-}
-
-// Handle visibility change to re-request wake lock and restart robust watches
+// Handle visibility change to re-request wake lock if needed
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible') {
-    // Driver: clear old watcher first to prevent duplicate GPS watchers stacking
-    if (S.driverOn) {
-      if (S.driverWid !== null) {
-        navigator.geolocation.clearWatch(S.driverWid);
-        S.driverWid = null;
-      }
-      startRobustDriverWatch();
-    }
-    if (S.sleepOn) startRobustSleepWatch();
-    if (wakeLock !== null) requestWakeLock();
-    if (_wl !== null) reqWakeLock();
-  } else {
-    // App going to background — log for diagnostics
-    if (S.driverOn) console.log('📡 App backgrounded — heartbeat + silent audio keeping GPS alive');
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    requestWakeLock();
   }
 });
-
-// ─── BACKGROUND KEEP-ALIVE ───────────────────────────────────────
-const BackgroundKeepAlive = {
-  audioEl: null,
-  active: false,
-
-  start() {
-    if (this.active) return;
-    this.active = true;
-    console.log('🔄 BackgroundKeepAlive starting...');
-
-    // Method 1: HTML5 Audio Loop (Silent WAV)
-    try {
-      if (!this.audioEl) {
-        this.audioEl = new Audio("data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==");
-        this.audioEl.loop = true;
-      }
-      this.audioEl.play().then(() => {
-        console.log('🔊 Looping silent audio playing (Background Keep-Alive Active)');
-      }).catch(err => {
-        console.warn('Silent audio play failed:', err);
-      });
-    } catch (e) {
-      console.warn('HTML5 Audio keep-alive error:', e);
-    }
-
-    // Register visibility change listener to keep it playing if paused by OS
-    this._onVisibilityChange = () => {
-      if (this.active && this.audioEl && this.audioEl.paused) {
-        this.audioEl.play().catch(() => {});
-      }
-    };
-    document.addEventListener('visibilitychange', this._onVisibilityChange);
-  },
-
-  stop() {
-    if (!this.active) return;
-    this.active = false;
-    console.log('🔄 BackgroundKeepAlive stopping...');
-
-    try {
-      if (this.audioEl) {
-        this.audioEl.pause();
-        this.audioEl.currentTime = 0;
-      }
-    } catch (e) { }
-
-    if (this._onVisibilityChange) {
-      document.removeEventListener('visibilitychange', this._onVisibilityChange);
-      this._onVisibilityChange = null;
-    }
-  }
-};
 
 function getDistance(la1, lo1, la2, lo2) {
   const R = 6371, dL = toR(la2 - la1), dO = toR(lo2 - lo1);
@@ -2242,37 +2010,33 @@ function setDriverCrowd(level, btnEl) {
 window.addEventListener('online', () => {
   q('#offline-badge')?.classList.remove('show');
   showToast('🌐 Back online');
-  // ── BUG FIX 3: startDriverLoop/stopDriverLoop do not exist.
-  // Use startRobustDriverWatch() to resume GPS sharing when coming back online.
-  if (S.driverOn) startRobustDriverWatch();
+  if (S.driverOn) startDriverLoop(); // Resume sharing location
 });
 
 window.addEventListener('offline', () => {
   q('#offline-badge')?.classList.add('show');
-  showToast('⚡ Connection lost — GPS caching locally...');
-  // No need to stop the watchPosition — let it keep recording to the offline queue
+  showToast('⚡ Connection lost');
+  if (S.driverOn) stopDriverLoop(); // Pause sharing
 });
 
-// ─── FIX: Clear driver session on page unload ────────────────────
-// When a developer refreshes the page while in driver mode, stopDriver() is
-// never called, so ba_driver_session stays active:true in localStorage. On the
-// next load, loadLocal() sees active:true and auto-resumes GPS sharing —
-// pushing the developer's location to Firebase and overwriting the real driver.
-// This beforeunload clears the session flag synchronously before unload completes.
-window.addEventListener('beforeunload', () => {
-  if (S.driverOn) {
-    lsSave('ba_driver_session', { active: false });
-    // Best-effort: mark bus inactive so the onDisconnect() handler is not
-    // the only safety net. (Synchronous XHR on unload is unreliable, so
-    // we rely on the existing onDisconnect rule set in startDriver().)
-    console.log('🔌 Page unloading with driver active — session cleared.');
+function doInstall() {
+  if (_installPrompt) {
+    _installPrompt.prompt();
+    _installPrompt.userChoice.then(result => {
+      if (result.outcome === 'accepted') showToast('🎉 BusAlert installed!');
+      _installPrompt = null;
+      dismissInstall();
+    });
+  } else {
+    showToast('On iPhone: tap Share → "Add to Home Screen"');
+    dismissInstall();
   }
-});
+}
 
-// NOTE: doInstall() and dismissInstall() are defined above (lines ~2085–2097).
-// ── BUG FIX 4: Removed duplicate definitions that silently overrode the
-//    earlier async versions (which save the dismiss timestamp to localStorage).
-//    The async versions are the correct ones and are kept above.
+function dismissInstall() {
+  const banner = q('#install-banner');
+  if (banner) banner.classList.add('hidden');
+}
 
 window.addEventListener('appinstalled', () => {
   dismissInstall();
@@ -2402,22 +2166,6 @@ async function checkEmailExists(email) {
   return false;
 }
 
-// ─── ROLE CONFLICT GUARD ─────────────────────────────────────────
-// Returns the stored role for an email across all collections, or null.
-// Used to block a user from logging in under a different role than registered.
-async function getRoleByEmail(email) {
-  let qs = await S.studentDb.collection('students').where('email', '==', email).get();
-  if (!qs.empty) return 'student';
-  qs = await S.driverDb.collection('drivers').where('email', '==', email).get();
-  if (!qs.empty) return 'driver';
-  qs = await S.adminDb.collection('admins').where('email', '==', email).get();
-  if (!qs.empty) return 'admin';
-  return null;
-}
-
-// Capitalises a role name for display (e.g. 'student' → 'Student')
-function capitaliseRole(r) { return r ? r.charAt(0).toUpperCase() + r.slice(1) : r; }
-
 function showRoleScreen() {
   q('#role-screen').classList.remove('hidden');
   q('#auth-screen').classList.add('hidden');
@@ -2445,21 +2193,10 @@ function toggleAuthMode() {
 
 function renderAuthMode() {
   const isReg = S.isRegisterMode;
-  const roleName = capitaliseRole(S.selectedRole || 'student');
-  
-  q('#auth-title').textContent = `${roleName} ${isReg ? 'Registration' : 'Login'}`;
+  q('#auth-title').textContent = isReg ? 'Register' : 'Login';
   q('#auth-submit-btn').textContent = isReg ? 'Sign up' : 'Login';
   q('#auth-switch').textContent = isReg ? 'Sign in' : 'Sign up';
   
-  // Update Google Button text dynamically
-  const googleBtn = q('#google-signin-btn');
-  if (googleBtn) {
-    googleBtn.innerHTML = `
-      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
-      Continue as ${roleName} with Google
-    `;
-  }
-
   // Update the footer text prefix
   const footerPrefix = q('.footer-v4 p')?.childNodes[0];
   if (footerPrefix) {
@@ -2486,14 +2223,16 @@ async function handleAuthSubmit() {
     if (pass.length < 6) { err.textContent = '⚠️ Password too weak.'; return; }
   }
 
-  showAuthLoading(S.isRegisterMode ? 'Creating your account...' : 'Signing you in...');
+  err.textContent = '⏳ Processing...';
+  if (btn) btn.disabled = true;
 
   try {
     let user;
     if (S.isRegisterMode) {
       const exists = await checkEmailExists(email);
       if (exists) {
-        resetAuthLoading('❌ Email is already registered.');
+        err.textContent = '❌ Email is already registered.';
+        if (btn) btn.disabled = false;
         return;
       }
 
@@ -2511,129 +2250,83 @@ async function handleAuthSubmit() {
     } else {
       const res = await S.auth.signInWithEmailAndPassword(email, pass);
       user = res.user;
-
-      // ── ROLE CONFLICT CHECK ────────────────────────────────────
-      const storedRole = await getRoleByUid(user.uid);
-      if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
-        await S.auth.signOut();
-        resetAuthLoading(
-          `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-          `Please login using the correct role.`
-        );
-        return;
+      // ⚡ Check localStorage cache first — skip DB round-trip
+      const cachedRole = localStorage.getItem('ba_cached_role');
+      const cachedCode  = localStorage.getItem('ba_college_code');
+      if (cachedRole) {
+        S.user = user;
+        S.role = cachedRole;
+        if (cachedCode) S.collegeCode = cachedCode;
+      } else {
+        // First time on this device — fetch from DB once (also restores collegeCode)
+        S.role = await getRoleByUid(user.uid);
+        S.user = user;
       }
-      // ──────────────────────────────────────────────────────────
-
-      S.user = user;
-      S.role = storedRole;
-      if (!S.role) {
-        resetAuthLoading('⚠️ No role found. Please register first.');
-        return;
-      }
+      if (!S.role) { err.textContent = '⚠️ No role found. Please register first.'; return; }
     }
     // Cache role + college code for instant future logins
     localStorage.setItem('ba_cached_role', S.role);
     if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
-    resetAuthLoading('');
     handleAuthSuccess(user);
   } catch (e) {
-    const errorMsg = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
+    err.textContent = '❌ ' + (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
       ? 'Incorrect email or password.' : e.message);
-    resetAuthLoading(errorMsg);
-  }
-}
-
-// ─── AUTH LOADING STATE ────────────────────────────────────────
-// Shows spinner + blurs form. Blocks all interaction during auth.
-function showAuthLoading(msg) {
-  const overlay = q('#auth-loading-overlay');
-  const body    = q('#auth-form-body');
-  const msgEl   = q('#auth-loading-msg');
-  if (msgEl)   msgEl.textContent = msg || 'Signing you in...';
-  if (overlay) overlay.classList.remove('hidden');
-  if (body)    body.classList.add('auth-blurred');
-  // Disable all interactive elements inside the auth box
-  q('#auth-screen')?.querySelectorAll('button, input, a').forEach(el => el.disabled = true);
-}
-
-// Hides spinner + restores form. Call on error or cancellation.
-function resetAuthLoading(errorMsg) {
-  const overlay = q('#auth-loading-overlay');
-  const body    = q('#auth-form-body');
-  if (overlay) overlay.classList.add('hidden');
-  if (body)    body.classList.remove('auth-blurred');
-  // Re-enable all interactive elements
-  q('#auth-screen')?.querySelectorAll('button, input, a').forEach(el => el.disabled = false);
-  if (errorMsg) {
-    const err = q('#auth-err');
-    if (err) err.innerHTML = errorMsg;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
 async function loginWithGoogle() {
   if (!S.auth || !S.db) { q('#auth-err').textContent = '⏳ Firebase not ready.'; return; }
   const err = q('#auth-err');
-  err.textContent = '';
-
-  // ── LOCK THE UI immediately so the user can't click anything else ──
-  showAuthLoading('Signing you in...');
+  err.textContent = '🌐 Opening Google sign-in...';
   
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    S.authInProgress = true;
-    const res = await S.auth.signInWithPopup(provider);
-    const user = res.user;
-
-    // Update loading message while we fetch role from Firestore
-    const msgEl = q('#auth-loading-msg');
-    if (msgEl) msgEl.textContent = 'Verifying your account...';
-
-    // ── ROLE CONFLICT CHECK ──────────────────────────────────────
-    const storedRole = await getRoleByUid(user.uid);
-
-    if (storedRole && S.selectedRole && storedRole !== S.selectedRole) {
-      await S.auth.signOut();
-      S.authInProgress = false;
-      resetAuthLoading(
-        `❌ This email is already registered as a <b>${capitaliseRole(storedRole)}</b>.<br>` +
-        `Please login using the correct role.`
-      );
-      return;
-    }
-    // ────────────────────────────────────────────────────────────
-
-    S.user = user;
-
-    if (storedRole) {
-      S.role = storedRole;
+    
+    // Check if mobile (Redirect is more reliable on mobile)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      // ⚡ IMPORTANT: Save role intent before redirecting
+      localStorage.setItem('ba_pending_role', S.selectedRole || 'student');
+      await S.auth.signInWithRedirect(provider);
     } else {
-      if (msgEl) msgEl.textContent = 'Setting up your account...';
-      const role = S.selectedRole || 'student';
-      const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
-      if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
-      else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
-      else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
-      S.role = role;
-    }
+      const res = await S.auth.signInWithPopup(provider);
+      const user = res.user;
+      S.user = user;
 
-    localStorage.setItem('ba_cached_role', S.role);
-    if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
-    S.authInProgress = false;
-    resetAuthLoading(''); // Clear overlay state cleanly
-    handleAuthSuccess(user);
+      const cachedRole = localStorage.getItem('ba_cached_role');
+      const cachedCode  = localStorage.getItem('ba_college_code');
+      if (cachedRole) {
+        S.role = cachedRole;
+        if (cachedCode) S.collegeCode = cachedCode;
+      } else {
+        // First time on this device — also fetches + caches collegeCode from Firestore
+        const foundRole = await getRoleByUid(user.uid);
+        if (foundRole) {
+          S.role = foundRole;
+        } else {
+          const role = S.selectedRole || 'student';
+          const docData = { name: user.displayName || user.email, email: user.email, role, createdAt: Date.now() };
+          if (role === 'student') await S.studentDb.collection('students').doc(user.uid).set(docData);
+          else if (role === 'driver') await S.driverDb.collection('drivers').doc(user.uid).set(docData);
+          else if (role === 'admin') await S.adminDb.collection('admins').doc(user.uid).set(docData);
+          S.role = role;
+        }
+      }
+      localStorage.setItem('ba_cached_role', S.role);
+      if (S.collegeCode) localStorage.setItem('ba_college_code', S.collegeCode);
+      handleAuthSuccess(user);
+    }
   } catch (e) {
-    S.authInProgress = false;
-    if (e.code === 'auth/popup-closed-by-user') {
-      // User dismissed the popup — restore form cleanly with no error
-      resetAuthLoading('');
-    } else if (e.code === 'auth/unauthorized-domain') {
+    if (e.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
-      resetAuthLoading(
-        `❌ Domain <b>${domain}</b> not authorized.<br><br>` +
-        `Add it in <b>Firebase Console → Auth → Settings → Authorized Domains</b>.`
-      );
+      err.innerHTML = `❌ Domain <b>${domain}</b> not authorized.<br><br>To fix this:<br>1. Go to <b>Firebase Console</b><br>2. <b>Auth > Settings > Authorized Domains</b><br>3. Add <b>${domain}</b> to the list.`;
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      err.textContent = '❌ ' + e.message;
     } else {
-      resetAuthLoading('❌ ' + e.message);
+      err.textContent = '';
     }
   }
 }
@@ -2760,132 +2453,3 @@ function switchRole() {
   closeProfile();
   location.reload();
 }
-
-// ─── PULL-TO-REFRESH ─────────────────────────────────────────────
-// Intercepts touch-pull-down on the app shell and performs a soft
-// data refresh (re-fetches buses, restarts poller, invalidates map)
-// WITHOUT a page reload — so all tracking state is preserved.
-(function initPullToRefresh() {
-  const PTR_THRESHOLD = 72;   // px of pull needed to trigger refresh
-  const PTR_MAX_PULL  = 110;  // max visual travel (rubber-band stop)
-
-  let _ptrStartY    = 0;
-  let _ptrDist      = 0;
-  let _ptrActive    = false;
-  let _ptrRefreshing = false;
-
-  const appEl = document.getElementById('app');
-  const ptrEl = document.getElementById('ptr-indicator');
-  const ptrLabel = ptrEl?.querySelector('.ptr-label');
-
-  if (!appEl || !ptrEl) return; // guard: elements not ready yet
-
-  function _getScrollTop() {
-    // Find whichever panel is currently active and check its scroll
-    const active = appEl.querySelector('.panel.active');
-    return active ? active.scrollTop : 0;
-  }
-
-  appEl.addEventListener('touchstart', e => {
-    if (_ptrRefreshing) return;
-    _ptrStartY = e.touches[0].clientY;
-    _ptrDist   = 0;
-    _ptrActive = false;
-  }, { passive: true });
-
-  appEl.addEventListener('touchmove', e => {
-    if (_ptrRefreshing) return;
-    const y    = e.touches[0].clientY;
-    const diff = y - _ptrStartY;
-
-    // Only activate pull-to-refresh when:
-    //   1. User is pulling DOWN (diff > 0)
-    //   2. The active panel is scrolled to the very top (scrollTop === 0)
-    if (diff > 0 && _getScrollTop() === 0) {
-      _ptrActive = true;
-      _ptrDist   = Math.min(diff * 0.55, PTR_MAX_PULL); // dampen the movement
-
-      if (_ptrDist > 8) {
-        ptrEl.classList.add('ptr-pulling');
-        ptrEl.classList.remove('ptr-refreshing');
-        if (ptrLabel) {
-          ptrLabel.textContent = _ptrDist >= PTR_THRESHOLD
-            ? 'Release to refresh'
-            : 'Pull down to refresh';
-        }
-      }
-    } else {
-      _ptrActive = false;
-    }
-  }, { passive: true });
-
-  appEl.addEventListener('touchend', () => {
-    if (!_ptrActive || _ptrRefreshing) {
-      ptrEl.classList.remove('ptr-pulling');
-      return;
-    }
-    _ptrActive = false;
-
-    if (_ptrDist >= PTR_THRESHOLD) {
-      // ── TRIGGERED: do a soft data refresh ──
-      _ptrRefreshing = true;
-      ptrEl.classList.add('ptr-refreshing');
-      if (ptrLabel) ptrLabel.textContent = 'Refreshing...';
-
-      _doSoftRefresh().finally(() => {
-        setTimeout(() => {
-          ptrEl.classList.remove('ptr-pulling', 'ptr-refreshing');
-          _ptrRefreshing = false;
-          _ptrDist = 0;
-        }, 600);
-      });
-    } else {
-      // Not pulled far enough — snap back
-      ptrEl.classList.remove('ptr-pulling');
-      _ptrDist = 0;
-    }
-  }, { passive: true });
-
-  /**
-   * Soft refresh: re-fetches Firebase bus data and re-renders the UI
-   * without destroying any active Firebase listeners or tracking state.
-   */
-  async function _doSoftRefresh() {
-    try {
-      // 1. Re-fetch live bus data from Firebase (one-time fetch to update S.allBuses)
-      if (S.db && S.collegeCode) {
-        const snap = await S.db.ref('colleges/' + S.collegeCode + '/buses').once('value');
-        S.allBuses = snap.val() || {};
-      }
-
-      // 2. Re-render the bus list (search tab)
-      const searchVal = q('#route-search')?.value?.trim() || '';
-      renderBusList(searchVal);
-
-      // 3. If tracking a bus, restart the precise location poller
-      if (S.trackOn && S.trackedId) {
-        startBusPoller(S.trackedId);
-
-        // Also move marker to current known location immediately
-        const loc = S.allBuses[S.trackedId]?.location;
-        if (loc && loc.lat && loc.lon) {
-          moveBusOnMap(loc.lat, loc.lon);
-          updateTrackInfo(loc);
-        }
-      }
-
-      // 4. Invalidate Leaflet map in case layout shifted while backgrounded
-      if (S.map) {
-        setTimeout(() => S.map.invalidateSize(true), 100);
-      }
-
-      // 5. Refresh profile info (name / role badge)
-      renderProfileInfo();
-
-      showToast('✅ Refreshed!');
-    } catch (e) {
-      console.warn('Pull-to-refresh error:', e);
-      showToast('⚠️ Refresh failed — check connection.');
-    }
-  }
-})();
