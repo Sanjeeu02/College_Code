@@ -1434,11 +1434,11 @@ function driverLoginByCode() {
   statusEl.textContent = '🔍 Looking up bus...';
   statusEl.style.color = 'var(--muted2)';
 
-  // Fetch all profiles and find locally (avoids Firebase index requirement errors)
-  S.db.ref('colleges/' + S.collegeCode + '/bus_profiles').once('value', snap => {
+  // Fetch all buses for this college and find locally
+  S.db.ref('colleges/' + S.collegeCode + '/buses').once('value', snap => {
     const data = snap.val();
     if (!data) {
-      statusEl.textContent = '❌ No bus profiles found. Contact admin.';
+      statusEl.textContent = '❌ No buses found for this college. Contact admin.';
       statusEl.style.color = 'var(--red)';
       q('#driver-bus-preview').classList.add('hidden');
       q('#btn-driver').classList.add('hidden');
@@ -2633,48 +2633,7 @@ function handleAuthSuccess(user) {
   showToast(`👋 Welcome back, ${user.displayName || 'User'}!`);
 }
 
-async function verifyCollegeCode() {
-  const code = q('#college-code-input').value.trim().toUpperCase();
-  const err = q('#cc-error');
-  const btn = q('#college-code-screen .submit-btn-v4');
-  if (!code) { err.textContent = '⚠️ Please enter a college code.'; err.classList.remove('hidden'); return; }
-  
-  err.textContent = '⏳ Verifying code...';
-  err.classList.remove('hidden');
-  err.style.color = 'var(--text)';
-  if (btn) btn.disabled = true;
-  
-  try {
-    const doc = await S.studentDb.collection('colleges').doc(code).get();
-    if (!doc.exists) {
-      err.textContent = '❌ Invalid College Code. Please check with your admin.';
-      err.style.color = 'var(--red)';
-      if (btn) btn.disabled = false;
-      return;
-    }
-    
-    // ── Persist in Firestore profile (source of truth) ──
-    await S.usersDb.collection('users').doc(S.user.uid).update({ collegeCode: code });
-    
-    // ── Cache locally so we never show this screen again ──
-    S.collegeCode = code;
-    localStorage.setItem('ba_college_code', code);
-    
-    err.textContent = '✅ College verified! Redirecting...';
-    err.style.color = 'var(--green)';
-    
-    setTimeout(() => {
-      if (btn) btn.disabled = false;
-      handleAuthSuccess(S.user);
-    }, 900);
-    
-  } catch (e) {
-    console.error("College Code Error:", e);
-    err.textContent = '❌ Error verifying code: ' + e.message;
-    err.style.color = 'var(--red)';
-    if (btn) btn.disabled = false;
-  }
-}
+
 
 // ─── PROFILE LOGIC ──────────────────────────────────────────────
 function openProfile() {

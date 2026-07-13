@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -163,10 +163,10 @@
 <div id="cc-overlay" class="screen-overlay hidden">
   <div class="cc-box">
     <div class="cc-icon">🏢</div>
-    <h2 class="cc-title">Create / Enter College Code</h2>
-    <p class="cc-sub">Create a unique college code or enter an existing one to manage your fleet.</p>
+    <h2 class="cc-title">Create College Code</h2>
+    <p class="cc-sub">Create a unique college code to manage your fleet.</p>
     <input type="text" id="cc-input" class="cc-input" placeholder="e.g. SRM123" />
-    <button class="cc-btn" onclick="submitCollegeCode()">Verify Access</button>
+    <button class="cc-btn" onclick="submitCollegeCode()">Create Code</button>
     <div id="cc-msg" style="color:var(--red);font-size:0.8rem;margin-top:12px;min-height:16px;"></div>
   </div>
 </div>
@@ -287,7 +287,6 @@
       </div>
     </div>
     <div class="profile-menu">
-      
       <div class="profile-menu-item logout-item" onclick="doLogout()"><span>🚪</span> Logout</div>
     </div>
   </div>
@@ -361,30 +360,21 @@
       const doc = await docRef.get();
       
       if (doc.exists) {
-        // Link to existing college
+        msg.textContent = 'Invalid or already used College Code.';
+        btn.textContent = 'Create Code';
+        btn.disabled = false;
+      } else {
+        // Create new college
+        await docRef.set({
+          name: code,
+          collegeCode: code,
+          createdAt: Date.now()
+        });
         collegeCode = code;
         localStorage.setItem('ba_college_code', collegeCode);
         await fsdb.collection('users').doc(currentUser.uid).update({ collegeCode });
         document.getElementById('cc-overlay').classList.add('hidden');
         initApp();
-      } else {
-        // Create new college if doesn't exist
-        if(confirm("College code '" + code + "' not found. Create it now?")) {
-           await docRef.set({
-             name: code,
-             collegeCode: code,
-             createdAt: Date.now()
-           });
-           collegeCode = code;
-           localStorage.setItem('ba_college_code', collegeCode);
-           await fsdb.collection('users').doc(currentUser.uid).update({ collegeCode });
-           document.getElementById('cc-overlay').classList.add('hidden');
-           initApp();
-        } else {
-           msg.textContent = 'Verification cancelled.';
-           btn.textContent = 'Verify Access';
-           btn.disabled = false;
-        }
       }
     } catch (e) {
       msg.textContent = 'Error: ' + e.message;
