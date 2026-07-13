@@ -74,6 +74,10 @@
       <label>Full Name</label>
       <input type="text" id="f-name" placeholder="Enter your name"/>
     </div>
+    <div id="reg-cc-wrap" class="field-group hidden">
+      <label>College Code</label>
+      <input type="text" id="f-cc" placeholder="e.g. SRM123" style="text-transform:uppercase"/>
+    </div>
     <div class="field-group">
       <label>Email</label>
       <input type="email" id="f-email" placeholder="email@example.com"/>
@@ -123,6 +127,7 @@
   function toggleMode(){
     isReg=!isReg;
     document.getElementById('reg-name-wrap').classList.toggle('hidden',!isReg);
+    document.getElementById('reg-cc-wrap').classList.toggle('hidden',!isReg);
     document.getElementById('reg-confirm-wrap').classList.toggle('hidden',!isReg);
     document.getElementById('submit-btn').textContent=isReg?'Sign Up':'Login';
     document.getElementById('toggle-text').innerHTML=isReg?'Already have an account? <span onclick="toggleMode()">Sign in</span>':"Don't have an account? <span onclick='toggleMode()'>Sign up</span>";
@@ -130,7 +135,14 @@
   }
 
   async function loginGoogle(){
-    showLoad('Signing you in with Google...');
+    const cc = document.getElementById('f-cc') ? document.getElementById('f-cc').value.trim().toUpperCase() : '';
+    if(isReg){
+      if(!cc){ showErr('Please enter the College Code to register.'); return; }
+      showLoad('Verifying College Code...');
+      const ccDoc = await fsdb.collection('colleges').doc(cc).get();
+      if(!ccDoc.exists){ hideLoad(); showErr('Invalid College Code.'); return; }
+    }
+    showLoad('Signing in with Google...');
     try{
       const provider=new firebase.auth.GoogleAuthProvider();
       const res=await auth.signInWithPopup(provider);
@@ -143,7 +155,18 @@
         return;
       }
       if(!storedRole){
-        await fsdb.collection('users').doc(u.uid).set({name:u.displayName||u.email,email:u.email,role:ROLE,createdAt:Date.now()});
+        if(!cc){
+          try { await u.delete(); } catch(e){}
+          hideLoad();
+          if(!isReg) toggleMode();
+          showErr('New users must provide a College Code. Please enter it and try again.');
+          return;
+        }
+        await fsdb.collection('users').doc(u.uid).set({name:u.displayName||u.email,email:u.email,role:ROLE,collegeCode:cc,createdAt:Date.now()});
+        localStorage.setItem('ba_college_code', cc);
+      } else {
+        const existingCc = await getCollegeCode(u.uid);
+        if(existingCc) localStorage.setItem('ba_college_code', existingCc);
       }
       localStorage.setItem('ba_cached_role',ROLE);
       window.location.href='index.html';
@@ -157,19 +180,33 @@
     const email=document.getElementById('f-email').value.trim();
     const pass=document.getElementById('f-pass').value;
     if(!email||!pass){showErr('Please enter email and password.');return;}
-    showLoad(isReg?'Creating your account...':'Signing you in...');
-    try{
-      if(isReg){
-        const name=document.getElementById('f-name').value.trim();
-        const confirm=document.getElementById('f-confirm').value;
-        if(!name){hideLoad();showErr('Enter your full name.');return;}
-        if(pass!==confirm){hideLoad();showErr('Passwords do not match.');return;}
+    if(isReg){
+      const name=document.getElementById('f-name').value.trim();
+      const confirm=document.getElementById('f-confirm').value;
+      const cc=document.getElementById('f-cc').value.trim().toUpperCase();
+      if(!name){showErr('Enter your full name.');return;}
+      if(!cc){showErr('Enter your College Code.');return;}
+      if(pass!==confirm){showErr('Passwords do not match.');return;}
+      
+      showLoad('Verifying College Code...');
+      const ccDoc = await fsdb.collection('colleges').doc(cc).get();
+      if(!ccDoc.exists){ hideLoad(); showErr('Invalid College Code.'); return; }
+      
+      showLoad('Creating your account...');
+      try{
         const res=await auth.createUserWithEmailAndPassword(email,pass);
         await res.user.updateProfile({displayName:name});
-        await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
+        await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,collegeCode:cc,createdAt:Date.now()});
         localStorage.setItem('ba_cached_role',ROLE);
+        localStorage.setItem('ba_college_code',cc);
         window.location.href='index.html';
-      }else{
+      }catch(e){
+        hideLoad();
+        showErr('Error: '+e.message);
+      }
+    }else{
+      showLoad('Signing you in...');
+      try {
         const res=await auth.signInWithEmailAndPassword(email,pass);
         const storedRole=await getRole(res.user.uid);
         if(storedRole&&storedRole!==ROLE){
@@ -178,14 +215,20 @@
           showErr('This account is a <b>'+storedRole+'</b>. Please use the correct login page.');
           return;
         }
-        localStorage.setItem('ba_cached_role',ROLE);
         const cc=await getCollegeCode(res.user.uid);
-        if(cc)localStorage.setItem('ba_college_code',cc);
+        if(!cc){
+          await auth.signOut();
+          hideLoad();
+          showErr('Account missing College Code. Please register again.');
+          return;
+        }
+        localStorage.setItem('ba_cached_role',ROLE);
+        localStorage.setItem('ba_college_code',cc);
         window.location.href='index.html';
+      }catch(e){
+        hideLoad();
+        showErr('Error: '+(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'?'Incorrect email or password.':e.message));
       }
-    }catch(e){
-      hideLoad();
-      showErr('Error: '+(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'?'Incorrect email or password.':e.message));
     }
   }
 </script>

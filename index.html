@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <meta name="apple-mobile-web-app-title" content="BusAlert" />
-    <title>BusAlert — Live Bus Tracker</title>
+    <title>BusAlert â€” Live Bus Tracker</title>
     <meta name="description"
         content="Track your college bus live on a map. Sleep mode alerts you when near your stop." />
     <meta name="theme-color" content="#FFFFFF" />
@@ -42,7 +42,7 @@
 
 <body>
 
-    <!-- ── ROLE SELECTION ── -->
+    <!-- â”€â”€ ROLE SELECTION â”€â”€ -->
     <div id="role-screen" class="role-screen hidden">
         <div class="bg-blobs">
             <div class="blob blob-1"></div>
@@ -54,21 +54,21 @@
             <p class="role-sub">Please select your role to continue</p>
             <div class="role-options">
                 <button class="role-btn" onclick="window.location.href='student-login.html'">
-                    <div class="role-icon">🎓</div>
+                    <div class="role-icon">ðŸŽ“</div>
                     <div class="role-info">
                         <h4>Student</h4>
                         <p>Track your bus and set stop alerts</p>
                     </div>
                 </button>
                 <button class="role-btn" onclick="window.location.href='driver-login.html'">
-                    <div class="role-icon">🚍</div>
+                    <div class="role-icon">ðŸš</div>
                     <div class="role-info">
                         <h4>Driver</h4>
                         <p>Go live and share bus location</p>
                     </div>
                 </button>
                 <button class="role-btn" onclick="window.location.href='admin-login.html'">
-                    <div class="role-icon">🛡️</div>
+                    <div class="role-icon">ðŸ›¡ï¸</div>
                     <div class="role-info">
                         <h4>Admin</h4>
                         <p>Manage buses, routes and fleet</p>
@@ -78,14 +78,14 @@
         </div>
     </div>
 
-    <!-- ── AUTH SCREEN (Reverted to Split Layout) ── -->
+    <!-- â”€â”€ AUTH SCREEN (Reverted to Split Layout) â”€â”€ -->
     <div id="auth-screen" class="auth-screen hidden">
         <div class="auth-v4-container">
             <!-- Form Side -->
             <div class="auth-v4-left">
                 <div class="auth-v4-box">
                     
-                    <!-- ⏳ Auth Loading Overlay (shown during Google sign-in) -->
+                    <!-- â³ Auth Loading Overlay (shown during Google sign-in) -->
                     <div id="auth-loading-overlay" class="auth-loading-overlay hidden">
                         <div class="auth-spinner"></div>
                         <p id="auth-loading-msg">Signing you in...</p>
@@ -93,7 +93,7 @@
 
                     <div id="auth-form-body">
                     <div class="auth-v4-header">
-                        <div class="auth-v4-logo">🚌</div>
+                        <div class="auth-v4-logo">ðŸšŒ</div>
                         <h1 id="auth-title">Login</h1>
                     </div>
 
@@ -117,12 +117,12 @@
                         </div>
                         <div class="field-group-v4">
                             <label for="auth-pass">Password</label>
-                            <input type="password" id="auth-pass" placeholder="••••••••" />
+                            <input type="password" id="auth-pass" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
                         </div>
                         <div id="confirm-pass-wrap" class="hidden">
                             <div class="field-group-v4">
                                 <label for="auth-pass-confirm">Confirm Password</label>
-                                <input type="password" id="auth-pass-confirm" placeholder="••••••••" />
+                                <input type="password" id="auth-pass-confirm" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
                             </div>
                         </div>
                     </div>
@@ -156,7 +156,7 @@
         </div>
     </div>
 
-    <!-- ── COLLEGE CODE SCREEN ── -->
+    <!-- â”€â”€ COLLEGE CODE SCREEN â”€â”€ -->
     <div id="college-code-screen" class="role-screen hidden">
         <div class="bg-blobs">
             <div class="blob blob-1"></div>
@@ -178,12 +178,12 @@
         </div>
     </div>
 
-    <!-- ── PROFILE MODAL ── -->
+    <!-- â”€â”€ PROFILE MODAL â”€â”€ -->
     <div id="profile-modal" class="profile-panel hidden">
         <div class="profile-content">
-            <button class="close-profile-btn" onclick="closeProfile()">✕</button>
+            <button class="close-profile-btn" onclick="closeProfile()">âœ•</button>
             <div class="profile-header">
-                <div class="profile-avatar" id="p-avatar">👤</div>
+                <div class="profile-avatar" id="p-avatar">ðŸ‘¤</div>
                 <div class="profile-info">
                     <h3 id="p-name">Loading...</h3>
                     <p id="p-email">--</p>
@@ -192,20 +192,20 @@
             </div>
             <div class="profile-menu">
                 <div class="profile-menu-item" onclick="switchRole()">
-                    <span>🔄</span> Switch Role
+                    <span>ðŸ”„</span> Switch Role
                 </div>
                 <div class="profile-menu-item logout-item" onclick="handleLogout()">
-                    <span>⬅️</span> Logout
+                    <span>â¬…ï¸</span> Logout
                 </div>
             </div>
         </div>
     </div>
 
 
-    <!-- ── SPLASH ── -->
+    <!-- â”€â”€ SPLASH â”€â”€ -->
     <div id="splash" class="splash">
         <div class="splash-inner">
-            <div class="splash-logo">🚌</div>
+            <div class="splash-logo">ðŸšŒ</div>
             <h1 class="splash-title">BusAlert</h1>
             <p class="splash-sub">Premium Fleet Monitoring</p>
             <div class="splash-loader">
@@ -215,7 +215,7 @@
         </div>
     </div>
 
-    <!-- ── APP ── -->
+    <!-- â”€â”€ APP â”€â”€ -->
     <div id="app" class="app hidden">
 
         <!-- Pull-to-Refresh Indicator -->
@@ -227,7 +227,7 @@
         <!-- HEADER -->
         <header class="topbar">
             <div class="topbar-brand">
-                <span class="brand-icon">🚌</span>
+                <span class="brand-icon">ðŸšŒ</span>
                 <span class="brand-name">BusAlert</span>
             </div>
             <div class="topbar-right">
@@ -236,28 +236,28 @@
                     <span class="status-label" id="status-label">Idle</span>
                 </div>
                 <button class="theme-toggle-btn" id="theme-toggle" onclick="toggleTheme()"
-                    title="Toggle Dark Mode">🌙</button>
-                <button class="profile-btn" onclick="openProfile()" title="User Profile">👤</button>
+                    title="Toggle Dark Mode">ðŸŒ™</button>
+                <button class="profile-btn" onclick="openProfile()" title="User Profile">ðŸ‘¤</button>
             </div>
         </header>
 
         <!-- TABS -->
         <nav class="tabs">
             <button class="tab active" id="tab-sleep" onclick="switchTab('sleep')">
-                <span class="tab-ico">😴</span><span class="tab-txt">Sleep</span>
+                <span class="tab-ico">ðŸ˜´</span><span class="tab-txt">Sleep</span>
             </button>
             <button class="tab" id="tab-find" onclick="switchTab('find')">
-                <span class="tab-ico">🗺️</span><span class="tab-txt">Track Bus</span>
+                <span class="tab-ico">ðŸ—ºï¸</span><span class="tab-txt">Track Bus</span>
             </button>
             <button class="tab" id="tab-driver" onclick="switchTab('driver')">
-                <span class="tab-ico">🚍</span><span class="tab-txt">Driver</span>
+                <span class="tab-ico">ðŸš</span><span class="tab-txt">Driver</span>
             </button>
         </nav>
 
-        <!-- ─────────────── SLEEP MODE ─────────────── -->
+        <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ SLEEP MODE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <section id="panel-sleep" class="panel active">
             <div class="section-hero sleep-hero">
-                <div class="hero-emoji">😴</div>
+                <div class="hero-emoji">ðŸ˜´</div>
                 <div class="hero-text">
                     <h2>Sleep Mode</h2>
                     <p>We'll alert you with SOS alarm when near home.</p>
@@ -267,14 +267,14 @@
             <div class="block">
                 <div class="block-label">Home / Stop Location</div>
                 <button class="pill-btn" id="btn-set-home" onclick="setHomeFromGPS()">
-                    <span class="pill-ico">📍</span> Set My Home Location
+                    <span class="pill-ico">ðŸ“</span> Set My Home Location
                 </button>
                 <div class="coord-tag hidden" id="home-coord-tag">
-                    <span class="coord-check">✅</span>
+                    <span class="coord-check">âœ…</span>
                     <span id="home-coord-text"></span>
                     <!-- Edit button -->
                     <button class="edit-loc-btn" id="btn-edit-home" onclick="editHomeLocation()"
-                        title="Change location">✏️ Edit</button>
+                        title="Change location">âœï¸ Edit</button>
                 </div>
             </div>
 
@@ -320,31 +320,31 @@
 
             <!-- Start/Stop button -->
             <button class="main-btn sleep-btn" id="btn-sleep" onclick="toggleSleepMode()">
-                <span id="sleep-btn-label">😴 &nbsp;Start Sleep Mode</span>
+                <span id="sleep-btn-label">ðŸ˜´ &nbsp;Start Sleep Mode</span>
             </button>
 
-            <!-- SOS Alert overlay — requires manual stop -->
+            <!-- SOS Alert overlay â€” requires manual stop -->
             <div class="sos-overlay hidden" id="sleep-sos">
                 <div class="sos-pulse-ring"></div>
                 <div class="sos-pulse-ring delay1"></div>
                 <div class="sos-content">
-                    <div class="sos-icon">🔔</div>
+                    <div class="sos-icon">ðŸ””</div>
                     <div class="sos-title">WAKE UP!</div>
-                    <div class="sos-sub">You're near your stop — GET OFF NOW!</div>
+                    <div class="sos-sub">You're near your stop â€” GET OFF NOW!</div>
                     <button class="sos-stop-btn" onclick="stopSosAlarm('sleep')">
-                        ✋ I'm Awake — Stop Alarm
+                        âœ‹ I'm Awake â€” Stop Alarm
                     </button>
                 </div>
             </div>
         </section>
 
-        <!-- ─────────────── TRACK BUS ─────────────── -->
+        <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TRACK BUS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <section id="panel-find" class="panel hidden">
 
             <!-- Search View -->
             <div id="code-entry-view">
                 <div class="section-hero track-hero">
-                    <div class="hero-emoji">🗺️</div>
+                    <div class="hero-emoji">ðŸ—ºï¸</div>
                     <div class="hero-text">
                         <h2>Find My Bus</h2>
                         <p>Search by your stop name to see live buses.</p>
@@ -353,23 +353,23 @@
 
                 <div class="search-row">
                     <div class="search-box">
-                        <span class="search-icon-el">🔍</span>
+                        <span class="search-icon-el">ðŸ”</span>
                         <input type="text" id="route-search" class="search-input"
                             placeholder="Type stop: Ambur, Chennai..." oninput="onSearch()" autocomplete="off" />
-                        <button class="search-x" id="search-x" onclick="clearSearch()">✕</button>
+                        <button class="search-x" id="search-x" onclick="clearSearch()">âœ•</button>
                     </div>
                 </div>
 
                 <div id="bus-list-wrap">
                     <div class="empty-hint" id="bus-empty">
-                        <div class="empty-ico">🚏</div>
+                        <div class="empty-ico">ðŸš</div>
                         <p>Search your stop name to see live buses</p>
                     </div>
                     <div id="bus-list" class="bus-list hidden"></div>
                 </div>
             </div>
 
-            <!-- MAP TRACKING VIEW — shown when tracking a bus -->
+            <!-- MAP TRACKING VIEW â€” shown when tracking a bus -->
             <div id="map-view" class="hidden">
 
                 <!-- Full-screen map -->
@@ -392,13 +392,13 @@
                             <div style="display:flex;gap:6px;align-items:center">
                                 <button class="refresh-map-btn" id="btn-refresh-map" onclick="refreshTracking()"
                                     title="Refresh bus location">
-                                    🔄
+                                    ðŸ”„
                                 </button>
-                                <button class="stop-track-btn" onclick="stopTracking()">✕ Stop</button>
+                                <button class="stop-track-btn" onclick="stopTracking()">âœ• Stop</button>
                             </div>
                             <!-- Miss-Stop Alert button -->
                             <button class="miss-stop-btn" id="btn-miss-stop" onclick="openMissStopModal()">
-                                🆘 Driver Missed Me!
+                                ðŸ†˜ Driver Missed Me!
                             </button>
                         </div>
                     </div>
@@ -407,13 +407,13 @@
                     <div class="sheet-body">
                         <!-- Predictive Smart Card -->
                         <div id="leave-now-card" class="leave-now-card ready hidden">
-                            <div class="lnc-icon" id="lnc-icon">🚶</div>
+                            <div class="lnc-icon" id="lnc-icon">ðŸš¶</div>
                             <div class="lnc-text">
                                 <div class="lnc-title" id="lnc-title">Leave in -- mins</div>
                                 <div class="lnc-body" id="lnc-body">Bus is on schedule. Walk to the stop later.</div>
                             </div>
                             <button class="lnc-dismiss"
-                                onclick="document.getElementById('leave-now-card').classList.add('hidden')">✕</button>
+                                onclick="document.getElementById('leave-now-card').classList.add('hidden')">âœ•</button>
                         </div>
 
                         <div class="sheet-dist-row">
@@ -428,21 +428,21 @@
                             </div>
                         </div>
 
-                        <!-- ✨ AI Smart Insights + Chat -->
+                        <!-- âœ¨ AI Smart Insights + Chat -->
                         <div style="margin-top:10px; display:flex; gap:8px;">
                             <button class="pill-btn ai-insights-btn" id="btn-ai-insight" onclick="fetchAIInsight()"
                                 style="flex:1; border-radius: 12px; font-weight: 700; padding: 10px;">
-                                ✨ AI Insights
+                                âœ¨ AI Insights
                             </button>
                             <button class="pill-btn" id="btn-ai-chat" onclick="openAiChat()"
                                 style="flex:1; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-                                🤖 Ask Assistant
+                                ðŸ¤– Ask Assistant
                             </button>
                         </div>
 
                         <div id="decision-card" class="hidden"
                             style="margin-top:10px; padding:12px; border-radius:14px; border:1px solid #f59e0b; background: rgba(245,158,11,0.08);">
-                            <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px;">🧠 AI
+                            <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px;">ðŸ§  AI
                                 Decision Engine</div>
                             <div id="decision-text" style="font-size:0.85rem; color:var(--text); line-height:1.5;">
                                 Analyzing route options...</div>
@@ -450,11 +450,11 @@
 
                         <div class="sheet-stop-row">
                             <button class="pill-btn" id="btn-set-stop" onclick="setStopFromGPS()">
-                                <span class="pill-ico">📍</span> Set My Stop Location
+                                <span class="pill-ico">ðŸ“</span> Set My Stop Location
                             </button>
                             <div class="coord-tag hidden" id="stop-coord-tag">
-                                <span class="coord-check">✅</span><span id="stop-coord-text"></span>
-                                <button class="edit-loc-btn" onclick="editStopLocation()" title="Change stop">✏️
+                                <span class="coord-check">âœ…</span><span id="stop-coord-text"></span>
+                                <button class="edit-loc-btn" onclick="editStopLocation()" title="Change stop">âœï¸
                                     Edit</button>
                             </div>
                         </div>
@@ -477,13 +477,13 @@
                                     class="tog-slider"></span></label>
                         </div>
 
-                        <div class="map-hint" id="map-status-hint">📡 Waiting for bus GPS signal...</div>
+                        <div class="map-hint" id="map-status-hint">ðŸ“¡ Waiting for bus GPS signal...</div>
 
                         <!-- Alert active banner with manual stop -->
                         <div class="track-alert-banner hidden" id="track-alert-banner">
                             <div class="tab-inner">
-                                <span>🔔 BUS NEAR YOUR STOP!</span>
-                                <button class="tal-stop-btn" onclick="stopSosAlarm('track')">✋ Stop Alarm</button>
+                                <span>ðŸ”” BUS NEAR YOUR STOP!</span>
+                                <button class="tal-stop-btn" onclick="stopSosAlarm('track')">âœ‹ Stop Alarm</button>
                             </div>
                         </div>
 
@@ -491,9 +491,9 @@
                         <div class="track-alert-banner hidden" id="wait-banner"
                             style="background:linear-gradient(135deg,#059669,#047857);">
                             <div class="tab-inner">
-                                <span>🚌 Driver is WAITING — Hurry! 🏃</span>
+                                <span>ðŸšŒ Driver is WAITING â€” Hurry! ðŸƒ</span>
                                 <button class="tal-stop-btn"
-                                    onclick="document.getElementById('wait-banner').classList.add('hidden')">✓
+                                    onclick="document.getElementById('wait-banner').classList.add('hidden')">âœ“
                                     OK</button>
                             </div>
                         </div>
@@ -505,28 +505,28 @@
                     <div class="sos-pulse-ring"></div>
                     <div class="sos-pulse-ring delay1"></div>
                     <div class="sos-content">
-                        <div class="sos-icon">🚌</div>
+                        <div class="sos-icon">ðŸšŒ</div>
                         <div class="sos-title">BUS IS NEAR!</div>
-                        <div class="sos-sub">Get ready at your stop — bus approaching!</div>
+                        <div class="sos-sub">Get ready at your stop â€” bus approaching!</div>
                         <button class="sos-stop-btn" onclick="stopSosAlarm('track')">
-                            ✋ I'm Ready — Stop Alarm
+                            âœ‹ I'm Ready â€” Stop Alarm
                         </button>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- ─────────────── DRIVER MODE ─────────────── -->
+        <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ DRIVER MODE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <section id="panel-driver" class="panel hidden">
             <div class="section-hero driver-hero">
-                <div class="hero-emoji">🚍</div>
+                <div class="hero-emoji">ðŸš</div>
                 <div class="hero-text">
                     <h2>Driver Mode</h2>
                     <p>Enter your bus code from admin to go live.</p>
                 </div>
             </div>
 
-            <!-- Driver Login (code entry) — shown before going live -->
+            <!-- Driver Login (code entry) â€” shown before going live -->
             <div id="driver-login-view">
                 <div class="block">
                     <div class="block-label">Enter Bus Code</div>
@@ -537,7 +537,7 @@
                         oninput="this.value=this.value.toUpperCase()"
                         onkeydown="if(event.key==='Enter')driverLoginByCode()" />
                     <button class="main-btn" id="btn-verify-driver" style="margin-top:8px;padding:12px;font-size:.88rem"
-                        onclick="driverLoginByCode()">🔍 Verify Code</button>
+                        onclick="driverLoginByCode()">ðŸ” Verify Code</button>
                     <div id="driver-code-status"
                         style="font-size:.8rem;text-align:center;min-height:20px;margin-top:6px"></div>
                 </div>
@@ -546,7 +546,7 @@
                 <div id="driver-bus-preview" class="hidden" style="margin-top:4px">
                     <div class="block" style="border-color:#86efac;background:#f0fdf4">
                         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-                            <span style="font-size:1.4rem">🚌</span>
+                            <span style="font-size:1.4rem">ðŸšŒ</span>
                             <div>
                                 <div style="font-weight:800;font-size:1rem" id="dp-busnum">--</div>
                                 <div style="font-size:.78rem;color:var(--muted2)" id="dp-route">--</div>
@@ -584,19 +584,19 @@
 
                 <!-- Crowd Selector -->
                 <div class="block" style="margin-top: 10px; padding: 10px; border-color: var(--border);">
-                    <div class="block-label" style="font-size: .75rem;">👥 Bus Crowd Level</div>
+                    <div class="block-label" style="font-size: .75rem;">ðŸ‘¥ Bus Crowd Level</div>
                     <div class="crowd-selector">
-                        <button class="crowd-btn active-crowd" onclick="setDriverCrowd('light', this)">🟢 Empty</button>
-                        <button class="crowd-btn" onclick="setDriverCrowd('moderate', this)">🟡 Half</button>
-                        <button class="crowd-btn" onclick="setDriverCrowd('heavy', this)">🔴 Full</button>
+                        <button class="crowd-btn active-crowd" onclick="setDriverCrowd('light', this)">ðŸŸ¢ Empty</button>
+                        <button class="crowd-btn" onclick="setDriverCrowd('moderate', this)">ðŸŸ¡ Half</button>
+                        <button class="crowd-btn" onclick="setDriverCrowd('heavy', this)">ðŸ”´ Full</button>
                     </div>
                 </div>
 
-                <!-- 🚀 AI Scenario Simulator -->
+                <!-- ðŸš€ AI Scenario Simulator -->
                 <div class="block"
                     style="margin-top: 10px; padding: 10px; border-color: #3b82f6; background: rgba(59, 130, 246, 0.05);">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div class="block-label" style="font-size: .75rem; color:#3b82f6; margin:0;">🤖 AI Dynamic
+                        <div class="block-label" style="font-size: .75rem; color:#3b82f6; margin:0;">ðŸ¤– AI Dynamic
                             Simulation</div>
                         <label class="tog"><input type="checkbox" id="sim-drive-toggle"
                                 onchange="toggleAiSimulation()" /><span class="tog-slider"></span></label>
@@ -605,16 +605,16 @@
                         real GPS, the AI will autonomously drive the bus on the map, slowing down at stops.</p>
 
                     <div style="margin-top: 10px;" id="sim-controls" class="hidden">
-                        <div class="block-label" style="font-size: .7rem;">🚦 Inject Live Scenarios</div>
+                        <div class="block-label" style="font-size: .7rem;">ðŸš¦ Inject Live Scenarios</div>
                         <div class="crowd-selector" style="grid-template-columns: 1fr 1fr;">
                             <button class="crowd-btn active-crowd" id="sim-scenario-clear"
-                                onclick="setScenario('clear', this)">🟢 Clear Traffic</button>
-                            <button class="crowd-btn" id="sim-scenario-jam" onclick="setScenario('jam', this)">🔴
+                                onclick="setScenario('clear', this)">ðŸŸ¢ Clear Traffic</button>
+                            <button class="crowd-btn" id="sim-scenario-jam" onclick="setScenario('jam', this)">ðŸ”´
                                 Traffic Jam</button>
-                            <button class="crowd-btn" id="sim-scenario-rain" onclick="setScenario('rain', this)">🌧️
+                            <button class="crowd-btn" id="sim-scenario-rain" onclick="setScenario('rain', this)">ðŸŒ§ï¸
                                 Rain Event</button>
                             <button class="crowd-btn" id="sim-scenario-breakdown"
-                                onclick="setScenario('breakdown', this)">⚠️ Breakdown</button>
+                                onclick="setScenario('breakdown', this)">âš ï¸ Breakdown</button>
                         </div>
                         <div style="font-size: 0.75rem; color: #a855f7; margin-top: 6px; font-weight: 600;"
                             id="sim-status-text">Simulating steady traffic...</div>
@@ -623,29 +623,29 @@
 
                 <!-- Access Code Display (for students) -->
                 <div class="access-code-box">
-                    <div class="acb-label">📢 Share this code with students:</div>
+                    <div class="acb-label">ðŸ“¢ Share this code with students:</div>
                     <div class="acb-code" id="dlc-access-code">----</div>
                     <div class="acb-hint">Students enter this code to track your bus</div>
                 </div>
 
                 <!-- Missed-Stop Alert Notification (for driver) -->
                 <div class="driver-alert-card hidden" id="driver-alert-card">
-                    <div class="dac-icon">🆘</div>
+                    <div class="dac-icon">ðŸ†˜</div>
                     <div class="dac-body">
                         <strong id="dac-name">Student</strong> missed the stop!
                         <div class="dac-loc" id="dac-loc">--</div>
                     </div>
                     <div class="dac-actions">
-                        <button class="dac-wait-btn" id="dac-wait-btn" onclick="driverPressedWait()">⏳ I'll
+                        <button class="dac-wait-btn" id="dac-wait-btn" onclick="driverPressedWait()">â³ I'll
                             Wait</button>
-                        <button class="dac-dismiss-btn" onclick="driverDismissAlert()">✕</button>
+                        <button class="dac-dismiss-btn" onclick="driverDismissAlert()">âœ•</button>
                     </div>
                 </div>
             </div>
 
             <!-- Go Live button -->
             <button class="main-btn driver-btn hidden" id="btn-driver" onclick="toggleDriver()">
-                <span id="driver-btn-label">🟢 &nbsp;Go Live — Share Location</span>
+                <span id="driver-btn-label">ðŸŸ¢ &nbsp;Go Live â€” Share Location</span>
             </button>
         </section>
 
@@ -654,7 +654,7 @@
     <!-- Code Verify Modal (shown when tapping Track from search results) -->
     <div id="code-verify-modal" class="modal-bg hidden">
         <div class="modal-box">
-            <div class="modal-title">🔑 Enter Bus Code</div>
+            <div class="modal-title">ðŸ”‘ Enter Bus Code</div>
             <p class="modal-desc">
                 Enter the <strong>4-digit code</strong> your driver shared.<br>
                 Only students with the correct code can track this bus.
@@ -665,12 +665,12 @@
                 <input class="code-input" id="cv-code-input" placeholder="e.g. KR7M" maxlength="6"
                     oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')verifyAndTrack()" />
             </div>
-            <div class="cv-error hidden" id="cv-error">❌ Wrong code. Ask your driver for today's code.</div>
+            <div class="cv-error hidden" id="cv-error">âŒ Wrong code. Ask your driver for today's code.</div>
             <div class="modal-actions">
                 <button class="pill-btn" onclick="closeCodeVerifyModal()">Cancel</button>
                 <button class="main-btn" onclick="verifyAndTrack()"
                     style="flex:1;padding:13px;background:var(--track-accent);color:white">
-                    🔓 Verify &amp; Track
+                    ðŸ”“ Verify &amp; Track
                 </button>
             </div>
         </div>
@@ -679,7 +679,7 @@
     <!-- Miss-Stop Modal -->
     <div id="miss-stop-modal" class="modal-bg hidden">
         <div class="modal-box">
-            <div class="modal-title">🆘 Alert Driver</div>
+            <div class="modal-title">ðŸ†˜ Alert Driver</div>
             <p class="modal-desc">Driver missed your stop? Send your name & location to the driver.</p>
             <div class="block">
                 <div class="block-label">Your Name</div>
@@ -690,7 +690,7 @@
             <div class="modal-actions">
                 <button class="pill-btn" onclick="closeMissStopModal()">Cancel</button>
                 <button class="main-btn" onclick="sendMissStopAlert()"
-                    style="flex:1;padding:12px;background:var(--red);color:white">📤 Send Alert</button>
+                    style="flex:1;padding:12px;background:var(--red);color:white">ðŸ“¤ Send Alert</button>
             </div>
         </div>
     </div>
@@ -698,7 +698,7 @@
     <!-- AI Insights Modal -->
     <div id="ai-modal" class="modal-bg hidden">
         <div class="modal-box" style="border-color: #8b5cf6;">
-            <div class="modal-title" style="color: #8b5cf6;">✨ AI Route Insights</div>
+            <div class="modal-title" style="color: #8b5cf6;">âœ¨ AI Route Insights</div>
             <p class="modal-desc" id="ai-response-text"
                 style="text-align: left; line-height: 1.5; font-size: 0.9rem; margin-top: 10px;">
                 Analyzing current route, traffic, and bus schedule...
@@ -710,13 +710,13 @@
         </div>
     </div>
 
-    <!-- 🤖 AI Chat Assistant Modal -->
+    <!-- ðŸ¤– AI Chat Assistant Modal -->
     <div id="ai-chat-modal" class="modal-bg hidden">
         <div class="modal-box" style="border-color: #10b981; max-height: 90vh; display:flex; flex-direction:column;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div class="modal-title" style="color: #10b981; margin:0;">🤖 Bus AI Assistant</div>
+                <div class="modal-title" style="color: #10b981; margin:0;">ðŸ¤– Bus AI Assistant</div>
                 <button onclick="document.getElementById('ai-chat-modal').classList.add('hidden')"
-                    style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);">✕</button>
+                    style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);">âœ•</button>
             </div>
             <p style="font-size:0.75rem; color:var(--muted); margin: 4px 0 8px;">Ask anything about your bus, route, or
                 ETA.</p>
@@ -729,18 +729,18 @@
                 <input id="chat-input" class="field" placeholder="e.g. Is my bus delayed?" style="flex:1; margin:0;"
                     onkeydown="if(event.key==='Enter') sendChatMessage()" />
                 <button class="main-btn" onclick="sendChatMessage()" style="padding:10px 16px; white-space:nowrap;">Send
-                    ➤</button>
+                    âž¤</button>
             </div>
             <!-- Quick Prompts -->
             <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
                 <button class="pill-btn" onclick="quickChat('When will my bus arrive?')"
-                    style="font-size:0.72rem; padding:5px 9px;">⏱ ETA?</button>
+                    style="font-size:0.72rem; padding:5px 9px;">â± ETA?</button>
                 <button class="pill-btn" onclick="quickChat('Is the bus delayed?')"
-                    style="font-size:0.72rem; padding:5px 9px;">⚠️ Delayed?</button>
+                    style="font-size:0.72rem; padding:5px 9px;">âš ï¸ Delayed?</button>
                 <button class="pill-btn" onclick="quickChat('How crowded is it?')"
-                    style="font-size:0.72rem; padding:5px 9px;">👥 Crowd?</button>
+                    style="font-size:0.72rem; padding:5px 9px;">ðŸ‘¥ Crowd?</button>
                 <button class="pill-btn" onclick="quickChat('Should I leave now?')"
-                    style="font-size:0.72rem; padding:5px 9px;">🏃 Leave now?</button>
+                    style="font-size:0.72rem; padding:5px 9px;">ðŸƒ Leave now?</button>
             </div>
         </div>
     </div>
@@ -750,7 +750,7 @@
     <!-- Install App Banner -->
     <div id="install-banner" class="install-banner hidden">
         <div class="install-content">
-            <span class="install-icon">🚌</span>
+            <span class="install-icon">ðŸšŒ</span>
             <div class="install-text">
                 <strong>Install BusAlert</strong>
                 <span>Add to home screen for quick access</span>
@@ -765,10 +765,11 @@
 
 
     <!-- Offline Indicator -->
-    <div id="offline-badge" class="offline-badge">⚡ Offline - Waiting for network</div>
+    <div id="offline-badge" class="offline-badge">âš¡ Offline - Waiting for network</div>
 
     <!-- Scripts -->
     <script src="app.js?v=29"></script>
 </body>
 
 </html>
+

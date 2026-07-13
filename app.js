@@ -571,15 +571,7 @@ function renderBusList(query = '') {
   const list = q('#bus-list'), empty = q('#bus-empty');
 
   const matches = Object.entries(S.allBuses).filter(([, b]) => {
-    if (!b.active) return false;
-
-    // Check staleness only if location exists. Buses might just be connecting to GPS.
-    if (b.location?.timestamp) {
-      const isStale = (Date.now() - b.location.timestamp) > 15 * 60 * 1000;
-      if (isStale) return false;
-    }
-
-    if (!ql) return true; // Show all active buses if no query
+    if (!ql) return true; // Show all buses if no query
 
     return (b.route || '').toLowerCase().includes(ql)
       || (b.busNumber || '').toLowerCase().includes(ql)
@@ -590,8 +582,8 @@ function renderBusList(query = '') {
     list.classList.add('hidden');
     empty.classList.remove('hidden');
     empty.innerHTML = ql
-      ? `<div class="empty-ico">🚌</div><p>No live buses for "<b>${esc(query)}</b>".</p>`
-      : `<div class="empty-ico">🚏</div><p>No active buses right now.<br>When drivers go live, they will appear here.</p>`;
+      ? `<div class="empty-ico">🚌</div><p>No buses for "<b>${esc(query)}</b>".</p>`
+      : `<div class="empty-ico">🚏</div><p>No buses registered for this college yet.</p>`;
     return;
   }
 
@@ -599,17 +591,23 @@ function renderBusList(query = '') {
   list.classList.remove('hidden');
 
   list.innerHTML = matches.map(([id, b]) => {
+    let isOffline = !b.active;
+    if (!isOffline && b.location?.timestamp) {
+      if ((Date.now() - b.location.timestamp) > 15 * 60 * 1000) isOffline = true;
+    }
+    const trackText = isOffline ? 'Offline' : (S.trackedId === id && S.trackOn ? '📡 Tracking' : 'Track');
+    
     return `
-      <div class="bus-card-v4" onclick="startTracking('${id}')">
+      <div class="bus-card-v4" onclick="${isOffline ? '' : `startTracking('${id}')`}">
         <div class="bus-card-info">
-          <h4>🚌 ${esc(b.busNumber || '--')}</h4>
+          <h4>🚌 ${esc(b.busNumber || '--')} ${isOffline ? '<span style="color:var(--red);font-size:0.6rem;border:1px solid var(--red);padding:2px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;">OFFLINE</span>' : ''}</h4>
           <p>📍 ${esc(b.route || '--')}</p>
           <div style="font-size:0.7rem; color:var(--muted2); margin-top:4px;">
-            ⏱ ${b.location?.timestamp ? timeAgo(b.location.timestamp) : 'No signal'}
+            ⏱ ${b.location?.timestamp && !isOffline ? timeAgo(b.location.timestamp) : (isOffline ? 'No recent signal' : 'Connecting...')}
           </div>
         </div>
-        <div class="bus-card-track">
-          ${S.trackedId === id && S.trackOn ? '📡 Tracking' : 'Track'}
+        <div class="bus-card-track" ${isOffline ? 'style="opacity:0.6;background:transparent;border:1px solid var(--border);color:var(--text);"' : ''}>
+          ${trackText}
         </div>
       </div>`;
   }).join('');
@@ -2608,23 +2606,10 @@ async function loginWithGoogle() {
 function handleAuthSuccess(user) {
   q('#role-screen').classList.add('hidden');
   q('#auth-screen').classList.add('hidden');
-  q('#college-code-screen').classList.add('hidden');
-
-
-  // Check if student/driver still needs college code verification.
-  // Prefer the in-memory value set by getRoleByUid (from Firestore),
-  // then fall back to the localStorage cache, and only show the
-  // college-code screen when neither source has a verified code.
   if (S.role !== 'admin') {
     const cachedCode = localStorage.getItem('ba_college_code');
     if (!S.collegeCode && cachedCode) {
-      // Restore from cache — no need to show the screen
       S.collegeCode = cachedCode;
-    }
-    if (!S.collegeCode) {
-      // No verified code found — show the verification screen
-      q('#college-code-screen').classList.remove('hidden');
-      return;
     }
   }
 
