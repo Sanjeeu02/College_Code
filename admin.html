@@ -1,13 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BusAlert — Admin Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>BusAlert � Admin Portal</title>
+  <meta name="description" content="BusAlert admin: manage buses, view history, and monitor live bus positions." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <!-- Firebase SDKs -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -15,353 +18,276 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d2e;
-      --card: #222538;
-      --accent: #6c63ff;
-      --accent2: #00d2ff;
-      --green: #22c55e;
-      --red: #ef4444;
-      --yellow: #f59e0b;
-      --text: #e8eaf6;
-      --muted: #8892b0;
-      --border: rgba(255,255,255,0.08);
+      --bg: #0f1117; --surface: #1a1d2e; --card: #222538;
+      --accent: #6c63ff; --accent2: #00d2ff;
+      --green: #22c55e; --red: #ef4444; --yellow: #f59e0b;
+      --text: #e8eaf6; --muted: #8892b0; --border: rgba(255,255,255,0.08);
     }
-    body {
-      font-family: 'Inter', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-    /* ── LOADING SCREEN ── */
-    #loading-screen {
-      position: fixed; inset: 0;
-      background: var(--bg);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 16px; z-index: 9999;
-    }
-    #loading-screen .spinner {
-      width: 48px; height: 48px;
-      border: 4px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    #loading-screen p { color: var(--muted); font-size: 0.9rem; }
-
-    /* ── SIDEBAR ── */
-    .layout { display: flex; min-height: 100vh; }
-    .sidebar {
-      width: 240px; background: var(--surface);
-      border-right: 1px solid var(--border);
-      display: flex; flex-direction: column;
-      padding: 24px 0; flex-shrink: 0;
-    }
-    .sidebar-logo {
-      display: flex; align-items: center; gap: 12px;
-      padding: 0 24px 28px;
-      border-bottom: 1px solid var(--border);
-    }
-    .sidebar-logo span { font-size: 1.8rem; }
-    .sidebar-logo h2 { font-size: 1rem; font-weight: 700; color: var(--text); }
-    .sidebar-logo p { font-size: 0.7rem; color: var(--muted); }
-    .sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
-    .nav-item {
-      display: flex; align-items: center; gap: 12px;
-      padding: 10px 14px; border-radius: 10px;
-      cursor: pointer; transition: all 0.2s;
-      color: var(--muted); font-size: 0.875rem; font-weight: 500;
-      border: none; background: none; width: 100%; text-align: left;
-    }
-    .nav-item:hover { background: rgba(108,99,255,0.1); color: var(--text); }
-    .nav-item.active { background: rgba(108,99,255,0.2); color: var(--accent); }
-    .nav-item .icon { font-size: 1.1rem; width: 22px; text-align: center; }
-    .sidebar-footer { padding: 16px 12px; border-top: 1px solid var(--border); }
-    .user-pill {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px; background: var(--card);
-      border-radius: 10px;
-    }
-    .user-avatar {
-      width: 34px; height: 34px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.85rem; font-weight: 700; color: #fff; flex-shrink: 0;
-    }
-    .user-info p { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
-    .user-info span { font-size: 0.7rem; color: var(--muted); }
-    .logout-btn {
-      width: 100%; margin-top: 8px; padding: 8px;
-      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
-      color: var(--red); border-radius: 8px; font-size: 0.8rem;
-      font-family: 'Inter', sans-serif; cursor: pointer; transition: 0.2s;
-    }
-    .logout-btn:hover { background: rgba(239,68,68,0.2); }
-
-    /* ── MAIN ── */
-    .main { flex: 1; padding: 32px; overflow-y: auto; }
-    .page { display: none; }
-    .page.active { display: block; }
-    .page-header { margin-bottom: 28px; }
-    .page-header h1 { font-size: 1.6rem; font-weight: 800; }
-    .page-header p { color: var(--muted); font-size: 0.875rem; margin-top: 4px; }
-
-    /* ── STATS GRID ── */
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
-    .stat-card {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 16px; padding: 20px 24px;
-      display: flex; align-items: center; gap: 16px;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-    .stat-icon { font-size: 2rem; }
-    .stat-val { font-size: 1.8rem; font-weight: 800; line-height: 1; }
-    .stat-label { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-
-    /* ── SECTION CARD ── */
-    .section-card {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 16px; padding: 24px; margin-bottom: 24px;
-    }
-    .section-card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
-
-    /* ── TABLE ── */
-    .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th { text-align: left; font-size: 0.75rem; color: var(--muted); font-weight: 600; padding: 8px 12px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; }
-    .data-table td { padding: 12px 12px; font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
-    .data-table tr:last-child td { border-bottom: none; }
-    .data-table tr:hover td { background: rgba(255,255,255,0.03); }
-    .badge {
-      display: inline-block; padding: 2px 10px; border-radius: 99px;
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-    }
-    .badge-student { background: rgba(108,99,255,0.2); color: #a79fff; }
-    .badge-driver  { background: rgba(0,210,255,0.2); color: #00d2ff; }
-    .badge-admin   { background: rgba(245,158,11,0.2); color: #f59e0b; }
-    .badge-active  { background: rgba(34,197,94,0.2); color: #22c55e; }
-    .badge-offline { background: rgba(255,255,255,0.05); color: var(--muted); }
-
-    /* ── FORM ── */
-    .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .form-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
-    .form-group label { font-size: 0.75rem; color: var(--muted); font-weight: 600; }
-    .form-group input, .form-group select {
-      padding: 10px 14px; background: var(--surface);
-      border: 1px solid var(--border); border-radius: 10px;
-      color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.875rem;
-      transition: border-color 0.2s;
-    }
-    .form-group input:focus, .form-group select:focus {
-      outline: none; border-color: var(--accent);
-    }
-    .form-group select option { background: var(--surface); }
-    .btn {
-      padding: 10px 20px; border-radius: 10px; font-size: 0.875rem;
-      font-family: 'Inter', sans-serif; font-weight: 600; cursor: pointer; border: none; transition: 0.2s;
-    }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #5a52d5; }
-    .btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
-    .btn-danger:hover { background: rgba(239,68,68,0.25); }
-    .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
-    .form-msg { font-size: 0.8rem; margin-top: 8px; min-height: 18px; }
-
-    /* ── COLLEGE CODE BOX ── */
-    .code-display {
-      font-size: 2rem; font-weight: 800; letter-spacing: 0.15em;
-      color: var(--accent); text-align: center; padding: 20px;
-      background: rgba(108,99,255,0.1); border-radius: 12px; margin: 16px 0;
-      border: 2px dashed rgba(108,99,255,0.4);
-    }
-
-    /* ── EMPTY STATE ── */
-    .empty { text-align: center; padding: 40px; color: var(--muted); }
-    .empty .icon { font-size: 3rem; margin-bottom: 12px; }
-    .empty p { font-size: 0.875rem; }
-
-    /* ── TOAST ── */
-    #admin-toast {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
-      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 12px 24px; font-size: 0.875rem; font-weight: 500;
-      transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1); z-index: 9999;
-      white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    }
-    #admin-toast.show { transform: translateX(-50%) translateY(0); }
-
-    /* ── RESPONSIVE ── */
-    @media (max-width: 640px) {
-      .sidebar { width: 60px; }
-      .sidebar-logo h2, .sidebar-logo p, .nav-item span:last-child, .user-info, .logout-btn { display: none; }
-      .sidebar-logo { padding: 0 16px 20px; justify-content: center; }
-      .nav-item { justify-content: center; padding: 12px; }
-      .sidebar-footer { padding: 12px 8px; }
-      .user-pill { justify-content: center; }
-      .main { padding: 20px 16px; }
-    }
+    body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; flex-direction:column; }
+    /* SPLASH */
+    #splash { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9999; }
+    #splash .splash-logo { font-size:3.5rem; animation:bounce 1s ease infinite alternate; }
+    @keyframes bounce { from{transform:translateY(0)} to{transform:translateY(-12px)} }
+    #splash h1 { font-size:1.8rem; font-weight:800; }
+    #splash p { color:var(--muted); font-size:0.85rem; }
+    #splash .spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    /* APP */
+    #app { display:none; flex-direction:column; flex:1; height:100vh; overflow:hidden; }
+    /* TOPBAR */
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; z-index:100; }
+    .topbar-brand { display:flex; align-items:center; gap:10px; }
+    .brand-icon { font-size:1.5rem; }
+    .brand-name { font-size:1rem; font-weight:800; }
+    .brand-tag { font-size:0.65rem; font-weight:700; color:var(--yellow); background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); padding:2px 8px; border-radius:99px; margin-left:6px; }
+    .topbar-right { display:flex; align-items:center; gap:10px; }
+    .status-pip { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); animation:pulse 2s ease infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .status-label { font-size:0.78rem; color:var(--muted); font-weight:500; }
+    .profile-btn { width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; cursor:pointer; font-size:.95rem; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; transition:transform .2s; }
+    .profile-btn:hover { transform:scale(1.08); }
+    /* TABS */
+    .tabs { display:flex; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; scrollbar-width:none; }
+    .tabs::-webkit-scrollbar { display:none; }
+    .tab { flex:1; min-width:70px; padding:12px 8px; border:none; background:none; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--muted); font-family:'Inter',sans-serif; font-size:.7rem; font-weight:600; border-bottom:2px solid transparent; transition:all .2s; }
+    .tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab:hover:not(.active) { color:var(--text); background:rgba(255,255,255,.03); }
+    .tab-ico { font-size:1.2rem; }
+    /* PANELS */
+    .panels { flex:1; overflow:hidden; position:relative; }
+    .panel { position:absolute; inset:0; display:flex; flex-direction:column; overflow-y:auto; opacity:0; pointer-events:none; transition:opacity .2s; }
+    .panel.active { opacity:1; pointer-events:all; }
+    /* MAP */
+    #admin-map { flex:1; min-height:0; width:100%; }
+    .map-legend { padding:12px 16px; background:var(--surface); border-top:1px solid var(--border); display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    .legend-item { display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--muted); }
+    .legend-dot { width:10px; height:10px; border-radius:50%; }
+    .legend-live { background:var(--green); box-shadow:0 0 6px var(--green); }
+    .legend-offline { background:var(--muted); }
+    #map-bus-count { margin-left:auto; font-size:.78rem; font-weight:700; color:var(--accent); }
+    /* BLOCK */
+    .block { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; margin:12px 16px 0; }
+    .block-label { font-size:.7rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:12px; }
+    /* HERO */
+    .section-hero { display:flex; align-items:center; gap:14px; padding:20px 16px 8px; }
+    .hero-emoji { font-size:2.2rem; }
+    .hero-text h2 { font-size:1.1rem; font-weight:800; }
+    .hero-text p { font-size:.8rem; color:var(--muted); margin-top:2px; }
+    /* STATS */
+    .stats-row { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; padding:12px 16px 0; }
+    .stat-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    .stat-icon { font-size:1.6rem; }
+    .stat-val { font-size:1.5rem; font-weight:800; line-height:1; }
+    .stat-label { font-size:.7rem; color:var(--muted); margin-top:2px; }
+    /* FORM */
+    .field { width:100%; padding:11px 14px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-family:'Inter',sans-serif; font-size:.875rem; transition:border-color .2s; outline:none; }
+    .field:focus { border-color:var(--accent); }
+    .field::placeholder { color:var(--muted); }
+    .main-btn { width:calc(100% - 32px); margin:12px 16px 0; padding:15px; border-radius:14px; border:none; background:linear-gradient(135deg,var(--accent),#8b5cf6); color:#fff; font-family:'Inter',sans-serif; font-size:.95rem; font-weight:700; cursor:pointer; transition:opacity .2s,transform .15s; box-shadow:0 4px 20px rgba(108,99,255,.35); }
+    .main-btn:hover { opacity:.92; transform:translateY(-1px); }
+    .main-btn:active { transform:scale(.98); }
+    .pill-btn { padding:9px 16px; border-radius:99px; background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:'Inter',sans-serif; font-size:.82rem; font-weight:600; cursor:pointer; transition:.2s; }
+    .pill-btn:hover { background:var(--card); border-color:var(--accent); color:var(--accent); }
+    /* GEN RESULT */
+    .gen-result { background:rgba(108,99,255,.1); border:2px dashed rgba(108,99,255,.4); border-radius:14px; padding:20px; text-align:center; margin:12px 16px 0; }
+    .gen-code { font-size:2.2rem; font-weight:800; letter-spacing:.15em; color:var(--accent); line-height:1; }
+    .gen-hint { font-size:.75rem; color:var(--muted); margin-top:6px; }
+    /* TABLE */
+    .bus-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+    .bus-table th { text-align:left; font-size:.68rem; color:var(--muted); font-weight:700; padding:8px 12px; border-bottom:1px solid var(--border); text-transform:uppercase; letter-spacing:.05em; }
+    .bus-table td { padding:11px 12px; border-bottom:1px solid rgba(255,255,255,.04); }
+    .bus-table tr:last-child td { border-bottom:none; }
+    .bus-table tr:hover td { background:rgba(255,255,255,.025); }
+    .badge { display:inline-block; padding:2px 10px; border-radius:99px; font-size:.68rem; font-weight:700; text-transform:uppercase; }
+    .badge-live { background:rgba(34,197,94,.2); color:#22c55e; }
+    .badge-off  { background:rgba(255,255,255,.06); color:var(--muted); }
+    /* EMPTY */
+    .empty-state { text-align:center; padding:40px 20px; color:var(--muted); }
+    .empty-state .e-ico { font-size:2.5rem; margin-bottom:10px; }
+    .empty-state p { font-size:.85rem; }
+    /* HISTORY */
+    .hist-item { display:flex; align-items:flex-start; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); }
+    .hist-item:last-child { border-bottom:none; }
+    .hist-ico { font-size:1.4rem; flex-shrink:0; margin-top:2px; }
+    .hist-title { font-size:.88rem; font-weight:700; }
+    .hist-sub { font-size:.75rem; color:var(--muted); margin-top:2px; }
+    .hist-time { margin-left:auto; font-size:.72rem; color:var(--muted); white-space:nowrap; padding-left:8px; }
+    /* PROFILE */
+    .profile-panel { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.6); display:flex; align-items:flex-end; }
+    .profile-panel.hidden { display:none; }
+    .profile-content { background:var(--surface); border-radius:20px 20px 0 0; padding:24px; width:100%; border-top:1px solid var(--border); position:relative; }
+    .close-profile-btn { position:absolute; top:16px; right:16px; background:var(--card); border:1px solid var(--border); border-radius:50%; width:32px; height:32px; cursor:pointer; color:var(--muted); font-size:.85rem; display:flex; align-items:center; justify-content:center; }
+    .profile-header { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
+    .profile-avatar { width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); display:flex; align-items:center; justify-content:center; font-size:1.3rem; font-weight:800; color:#fff; flex-shrink:0; }
+    .profile-info h3 { font-size:1rem; font-weight:700; }
+    .profile-info p { font-size:.8rem; color:var(--muted); margin-top:2px; }
+    .profile-role-tag { display:inline-block; margin-top:6px; font-size:.68rem; font-weight:700; text-transform:uppercase; background:rgba(245,158,11,.15); color:var(--yellow); border:1px solid rgba(245,158,11,.3); padding:2px 10px; border-radius:99px; }
+    .profile-menu { display:flex; flex-direction:column; gap:4px; }
+    .profile-menu-item { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; cursor:pointer; font-size:.88rem; font-weight:500; transition:background .15s; }
+    .profile-menu-item:hover { background:var(--card); }
+    .logout-item { color:var(--red); margin-top:4px; }
+    /* TOAST */
+    #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px); background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 24px; font-size:.875rem; font-weight:500; transition:transform .35s cubic-bezier(.34,1.56,.64,1); z-index:9999; white-space:nowrap; box-shadow:0 8px 32px rgba(0,0,0,.5); }
+    #toast.show { transform:translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
 
-<!-- Loading -->
-<div id="loading-screen">
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-logo">??</div>
+  <h1>BusAlert Admin</h1>
+  <p>Verifying admin access...</p>
   <div class="spinner"></div>
-  <p>Verifying admin access…</p>
 </div>
 
-<!-- Layout (hidden until verified) -->
-<div class="layout" id="admin-layout" style="display:none;">
-
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <span>🚌</span>
-      <div>
-        <h2>BusAlert</h2>
-        <p>Admin Portal</p>
-      </div>
+<!-- APP -->
+<div id="app">
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="brand-icon">??</span>
+      <span class="brand-name">BusAlert</span>
+      <span class="brand-tag">ADMIN</span>
     </div>
-    <nav class="sidebar-nav">
-      <button class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
-        <span class="icon">📊</span><span>Dashboard</span>
-      </button>
-      <button class="nav-item" onclick="showPage('users')" id="nav-users">
-        <span class="icon">👥</span><span>Users</span>
-      </button>
-      <button class="nav-item" onclick="showPage('buses')" id="nav-buses">
-        <span class="icon">🚍</span><span>Live Buses</span>
-      </button>
-      <button class="nav-item" onclick="showPage('college')" id="nav-college">
-        <span class="icon">🔑</span><span>College Code</span>
-      </button>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="user-pill">
-        <div class="user-avatar" id="admin-avatar">A</div>
-        <div class="user-info">
-          <p id="admin-name">Admin</p>
-          <span>Administrator</span>
+    <div class="topbar-right">
+      <div class="topbar-status" style="display:flex;align-items:center;gap:6px;">
+        <span class="status-pip"></span>
+        <span class="status-label">Live</span>
+      </div>
+      <button class="profile-btn" id="profile-btn-avatar" onclick="openProfile()" title="Admin Profile">A</button>
+    </div>
+  </header>
+
+  <!-- TABS -->
+  <nav class="tabs">
+    <button class="tab active" id="tab-map" onclick="switchTab('map')">
+      <span class="tab-ico">???</span><span class="tab-txt">Map</span>
+    </button>
+    <button class="tab" id="tab-generate" onclick="switchTab('generate')">
+      <span class="tab-ico">??</span><span class="tab-txt">Bus Generate</span>
+    </button>
+    <button class="tab" id="tab-history" onclick="switchTab('history')">
+      <span class="tab-ico">??</span><span class="tab-txt">History</span>
+    </button>
+    <button class="tab" id="tab-buses" onclick="switchTab('buses')">
+      <span class="tab-ico">??</span><span class="tab-txt">Buses</span>
+    </button>
+  </nav>
+
+  <!-- PANELS -->
+  <div class="panels">
+
+    <!-- MAP -->
+    <section id="panel-map" class="panel active">
+      <div id="admin-map"></div>
+      <div class="map-legend">
+        <div class="legend-item"><div class="legend-dot legend-live"></div> Live Bus</div>
+        <div class="legend-item"><div class="legend-dot legend-offline"></div> Offline</div>
+        <div id="map-bus-count">0 buses live</div>
+      </div>
+    </section>
+
+    <!-- BUS GENERATE -->
+    <section id="panel-generate" class="panel">
+      <div class="section-hero">
+        <div class="hero-emoji">??</div>
+        <div class="hero-text">
+          <h2>Bus Generate</h2>
+          <p>Create and manage bus codes for drivers.</p>
         </div>
       </div>
-      <button class="logout-btn" onclick="doLogout()">⬅️ Logout</button>
-    </div>
-  </aside>
-
-  <!-- Main Content -->
-  <main class="main">
-
-    <!-- Dashboard -->
-    <div class="page active" id="page-dashboard">
-      <div class="page-header">
-        <h1>Dashboard</h1>
-        <p>Overview of your college bus network</p>
-      </div>
-      <div class="stats-grid">
+      <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-icon">🎓</div>
-          <div><div class="stat-val" id="stat-students">—</div><div class="stat-label">Students</div></div>
+          <div class="stat-icon">??</div>
+          <div><div class="stat-val" id="stat-total-buses">�</div><div class="stat-label">Total Buses</div></div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">🚍</div>
-          <div><div class="stat-val" id="stat-drivers">—</div><div class="stat-label">Drivers</div></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">🟢</div>
-          <div><div class="stat-val" id="stat-live">—</div><div class="stat-label">Live Buses</div></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">🔑</div>
-          <div><div class="stat-val" id="stat-code">—</div><div class="stat-label">College Code</div></div>
+          <div class="stat-icon">??</div>
+          <div><div class="stat-val" id="stat-live-buses">�</div><div class="stat-label">Live Now</div></div>
         </div>
       </div>
-      <div class="section-card">
-        <h2>📍 Live Bus Positions</h2>
-        <div id="dash-bus-list"><div class="empty"><div class="icon">🚌</div><p>No buses currently live</p></div></div>
+      <div class="block">
+        <div class="block-label">Create New Bus</div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <input class="field" id="gen-bus-num" placeholder="Bus Number (e.g. BUS-01)" />
+          <input class="field" id="gen-route" placeholder="Route (e.g. Ambur to Chennai)" />
+          <input class="field" id="gen-stops" placeholder="Stops (comma-separated)" />
+        </div>
       </div>
-    </div>
+      <button class="main-btn" onclick="generateBus()">? Generate Bus Code</button>
+      <div class="gen-result hidden" id="gen-result-box">
+        <div class="gen-hint">Driver Access Code</div>
+        <div class="gen-code" id="gen-code-display">----</div>
+        <div class="gen-hint" id="gen-route-display" style="margin-top:8px;"></div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
+          <button class="pill-btn" onclick="copyGenCode()">?? Copy Code</button>
+          <button class="pill-btn" onclick="clearGenResult()">? Clear</button>
+        </div>
+      </div>
+      <div id="gen-msg" style="font-size:.8rem;text-align:center;min-height:20px;margin:10px 16px;color:var(--muted);"></div>
+    </section>
 
-    <!-- Users -->
-    <div class="page" id="page-users">
-      <div class="page-header">
-        <h1>Users</h1>
-        <p>All registered students and drivers</p>
-      </div>
-      <div class="section-card">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>College</th>
-              <th>Joined</th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody">
-            <tr><td colspan="5" class="empty" style="text-align:center; padding:32px; color:var(--muted);">Loading users…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Live Buses -->
-    <div class="page" id="page-buses">
-      <div class="page-header">
-        <h1>Live Buses</h1>
-        <p>Real-time bus locations from Firebase</p>
-      </div>
-      <div class="section-card">
-        <table class="data-table">
-          <thead>
-            <tr><th>Bus ID</th><th>Route</th><th>Status</th><th>Last Updated</th><th>Coords</th></tr>
-          </thead>
-          <tbody id="buses-tbody">
-            <tr><td colspan="5" class="empty" style="text-align:center; padding:32px; color:var(--muted);">Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- College Code -->
-    <div class="page" id="page-college">
-      <div class="page-header">
-        <h1>College Code</h1>
-        <p>Manage the secure code that links students and drivers to your college</p>
-      </div>
-      <div class="section-card">
-        <h2>🔑 Your College Code</h2>
-        <p style="color:var(--muted); font-size:0.85rem; margin-bottom:12px;">Share this code with your students and drivers so they can connect to your college network.</p>
-        <div class="code-display" id="current-code-display">Loading…</div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
-          <button class="btn btn-primary" onclick="copyCode()">📋 Copy Code</button>
-          <button class="btn btn-danger" onclick="regenerateCode()">🔄 Regenerate</button>
+    <!-- HISTORY -->
+    <section id="panel-history" class="panel">
+      <div class="section-hero">
+        <div class="hero-emoji">??</div>
+        <div class="hero-text">
+          <h2>History</h2>
+          <p>Recent bus activity and admin actions.</p>
         </div>
       </div>
-      <div class="section-card">
-        <h2>➕ Create New College</h2>
-        <p style="color:var(--muted); font-size:0.85rem; margin-bottom:16px;">Register a new college code in the system.</p>
-        <div class="form-row">
-          <div class="form-group">
-            <label>College Name</label>
-            <input type="text" id="college-name-input" placeholder="e.g. SRM Institute" />
-          </div>
-          <div class="form-group">
-            <label>College Code</label>
-            <input type="text" id="college-code-new" placeholder="e.g. SRM123" oninput="this.value=this.value.toUpperCase().replace(/\s/g,'')" />
-          </div>
-        </div>
-        <button class="btn btn-primary" style="margin-top:12px;" onclick="createCollegeCode()">Create College Code</button>
-        <div class="form-msg" id="college-msg"></div>
+      <div class="block">
+        <div class="block-label">Recent Activity</div>
+        <div id="history-list"><div class="empty-state"><div class="e-ico">??</div><p>Loading...</p></div></div>
       </div>
-    </div>
+      <div style="margin:12px 16px 16px;display:flex;gap:8px;">
+        <button class="pill-btn" style="flex:1;" onclick="loadHistory()">?? Refresh</button>
+        <button class="pill-btn" style="flex:1;" onclick="clearHistory()">??? Clear Log</button>
+      </div>
+    </section>
 
-  </main>
+    <!-- BUSES -->
+    <section id="panel-buses" class="panel">
+      <div class="section-hero">
+        <div class="hero-emoji">??</div>
+        <div class="hero-text">
+          <h2>All Buses</h2>
+          <p>Manage every bus in your network.</p>
+        </div>
+      </div>
+      <div class="block" style="padding:0;overflow:hidden;">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">Fleet</span>
+          <button class="pill-btn" style="font-size:.72rem;padding:5px 12px;" onclick="loadBuses()">?? Refresh</button>
+        </div>
+        <div id="buses-container"><div class="empty-state"><div class="e-ico">??</div><p>Loading buses...</p></div></div>
+      </div>
+    </section>
+
+  </div>
 </div>
 
-<div id="admin-toast"></div>
+<!-- PROFILE -->
+<div id="profile-modal" class="profile-panel hidden">
+  <div class="profile-content">
+    <button class="close-profile-btn" onclick="closeProfile()">?</button>
+    <div class="profile-header">
+      <div class="profile-avatar" id="p-avatar">A</div>
+      <div class="profile-info">
+        <h3 id="p-name">Admin</h3>
+        <p id="p-email">�</p>
+        <span class="profile-role-tag">Administrator</span>
+      </div>
+    </div>
+    <div class="profile-menu">
+      <div class="profile-menu-item" onclick="goToMainApp()"><span>??</span> Go to Main App</div>
+      <div class="profile-menu-item logout-item" onclick="doLogout()"><span>??</span> Logout</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
 
 <script>
   const FIREBASE_CFG = {
@@ -373,204 +299,196 @@
     messagingSenderId: "686712758756",
     appId: "1:686712758756:web:b671be77184b0f4bf9a7f1",
   };
+  firebase.initializeApp(FIREBASE_CFG);
+  const auth = firebase.auth();
+  const fsdb = firebase.firestore();
+  const rtdb = firebase.database();
 
-  let db, auth, usersDb, rtdb;
   let currentUser = null;
   let collegeCode = localStorage.getItem('ba_college_code') || null;
-
-  // ── INIT ──
-  firebase.initializeApp(FIREBASE_CFG);
-  auth = firebase.auth();
-  usersDb = firebase.firestore();
-  rtdb = firebase.database();
+  let adminMap = null;
+  let mapMarkers = {};
+  let historyLog = JSON.parse(localStorage.getItem('ba_admin_history') || '[]');
+  let lastGenCode = '';
 
   auth.onAuthStateChanged(async user => {
-    if (!user) {
-      // Not logged in — go back to main app
-      window.location.href = 'index.html';
-      return;
-    }
-
-    // Verify this user is actually an admin
+    if (!user) { window.location.href = 'index.html'; return; }
     try {
-      const doc = await usersDb.collection('users').doc(user.uid).get();
+      const doc = await fsdb.collection('users').doc(user.uid).get();
       if (!doc.exists || doc.data().role !== 'admin') {
-        toast('⛔ Access denied. Admins only.');
+        toast('Access denied - Admins only.');
         setTimeout(() => { auth.signOut(); window.location.href = 'index.html'; }, 2000);
         return;
       }
       currentUser = user;
       collegeCode = doc.data().collegeCode || collegeCode;
-      document.getElementById('admin-avatar').textContent = (user.displayName || user.email || 'A').charAt(0).toUpperCase();
-      document.getElementById('admin-name').textContent = user.displayName || user.email;
-      document.getElementById('loading-screen').style.display = 'none';
-      document.getElementById('admin-layout').style.display = 'flex';
-      loadDashboard();
-    } catch (e) {
-      toast('❌ Error verifying access: ' + e.message);
+      document.getElementById('splash').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      const initial = (user.displayName || user.email || 'A').charAt(0).toUpperCase();
+      document.getElementById('profile-btn-avatar').textContent = initial;
+      document.getElementById('p-avatar').textContent = initial;
+      document.getElementById('p-name').textContent = user.displayName || 'Admin';
+      document.getElementById('p-email').textContent = user.email;
+      initMap();
+      loadBuses();
+      loadHistory();
+      startLiveBusWatch();
+    } catch(e) {
+      toast('Error: ' + e.message);
       setTimeout(() => window.location.href = 'index.html', 2500);
     }
   });
 
-  // ── NAVIGATION ──
-  function showPage(name) {
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.getElementById('page-' + name).classList.add('active');
-    document.getElementById('nav-' + name).classList.add('active');
-    if (name === 'users') loadUsers();
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+    if (name === 'map') { setTimeout(() => { if(adminMap) adminMap.invalidateSize(); }, 150); }
     if (name === 'buses') loadBuses();
-    if (name === 'college') loadCollegeCode();
+    if (name === 'history') loadHistory();
   }
 
-  // ── DASHBOARD ──
-  async function loadDashboard() {
-    try {
-      const snap = await usersDb.collection('users').get();
-      let students = 0, drivers = 0;
-      snap.forEach(d => {
-        const r = d.data().role;
-        if (r === 'student') students++;
-        if (r === 'driver') drivers++;
-      });
-      document.getElementById('stat-students').textContent = students;
-      document.getElementById('stat-drivers').textContent = drivers;
-      document.getElementById('stat-code').textContent = collegeCode || 'None';
-    } catch(e) { console.error(e); }
-
-    // Live buses
-    if (collegeCode) {
-      rtdb.ref('colleges/' + collegeCode + '/buses').on('value', snap => {
-        const buses = snap.val() || {};
-        const keys = Object.keys(buses);
-        document.getElementById('stat-live').textContent = keys.length;
-        const list = document.getElementById('dash-bus-list');
-        if (!keys.length) {
-          list.innerHTML = '<div class="empty"><div class="icon">🚌</div><p>No buses currently live</p></div>';
-        } else {
-          list.innerHTML = `<table class="data-table"><thead><tr><th>Bus ID</th><th>Route</th><th>Status</th><th>Last Update</th></tr></thead><tbody>
-            ${keys.map(k => {
-              const b = buses[k];
-              const loc = b.location || {};
-              const ts = loc.ts ? new Date(loc.ts).toLocaleTimeString() : '—';
-              return `<tr><td>${k}</td><td>${b.route || '—'}</td><td><span class="badge badge-active">Live</span></td><td>${ts}</td></tr>`;
-            }).join('')}
-          </tbody></table>`;
-        }
-      });
-    }
+  function initMap() {
+    adminMap = L.map('admin-map', { zoomControl: true }).setView([13.0827, 80.2707], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '(c) OpenStreetMap', maxZoom: 19 }).addTo(adminMap);
   }
 
-  // ── USERS ──
-  async function loadUsers() {
-    const tbody = document.getElementById('users-tbody');
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--muted);">Loading…</td></tr>';
-    try {
-      const snap = await usersDb.collection('users').orderBy('createdAt', 'desc').get();
-      if (snap.empty) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">No users yet</td></tr>';
-        return;
-      }
-      tbody.innerHTML = snap.docs.map(d => {
-        const u = d.data();
-        const date = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—';
-        return `<tr>
-          <td>${u.name || '—'}</td>
-          <td style="color:var(--muted);font-size:0.8rem">${u.email || '—'}</td>
-          <td><span class="badge badge-${u.role || 'student'}">${u.role || 'student'}</span></td>
-          <td>${u.collegeCode || '—'}</td>
-          <td style="color:var(--muted);font-size:0.8rem">${date}</td>
-        </tr>`;
-      }).join('');
-    } catch(e) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--red);">Error: ${e.message}</td></tr>`;
-    }
-  }
-
-  // ── LIVE BUSES ──
-  function loadBuses() {
-    const tbody = document.getElementById('buses-tbody');
-    if (!collegeCode) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">No college code set</td></tr>';
-      return;
-    }
-    rtdb.ref('colleges/' + collegeCode + '/buses').on('value', snap => {
-      const buses = snap.val() || {};
-      const keys = Object.keys(buses);
-      if (!keys.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--muted);">No live buses right now</td></tr>';
-        return;
-      }
-      tbody.innerHTML = keys.map(k => {
-        const b = buses[k];
-        const loc = b.location || {};
-        const ts = loc.ts ? new Date(loc.ts).toLocaleTimeString() : '—';
-        const coords = (loc.lat && loc.lon) ? `${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}` : '—';
-        return `<tr>
-          <td>${k}</td>
-          <td>${b.route || '—'}</td>
-          <td><span class="badge badge-active">🟢 Live</span></td>
-          <td>${ts}</td>
-          <td style="font-size:0.75rem;color:var(--muted)">${coords}</td>
-        </tr>`;
-      }).join('');
+  function createBusIcon(isLive) {
+    return L.divIcon({
+      className: '',
+      html: '<div style="background:' + (isLive ? '#22c55e' : '#6b7280') + ';color:#fff;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);">??</div>',
+      iconSize: [34, 34], iconAnchor: [17, 17]
     });
   }
 
-  // ── COLLEGE CODE ──
-  async function loadCollegeCode() {
-    document.getElementById('current-code-display').textContent = collegeCode || 'Not Set';
+  function startLiveBusWatch() {
+    if (!collegeCode) return;
+    rtdb.ref('colleges/' + collegeCode + '/buses').on('value', snap => {
+      const buses = snap.val() || {};
+      const keys = Object.keys(buses);
+      Object.values(mapMarkers).forEach(m => adminMap && adminMap.removeLayer(m));
+      mapMarkers = {};
+      let liveCount = 0;
+      keys.forEach(k => {
+        const b = buses[k];
+        const loc = b.location || {};
+        if (loc.lat && loc.lon) {
+          liveCount++;
+          const marker = L.marker([loc.lat, loc.lon], { icon: createBusIcon(true) })
+            .bindPopup('<b>' + k + '</b><br>Route: ' + (b.route || '-') + '<br>Updated: ' + (loc.ts ? new Date(loc.ts).toLocaleTimeString() : '-'))
+            .addTo(adminMap);
+          mapMarkers[k] = marker;
+        }
+      });
+      document.getElementById('map-bus-count').textContent = liveCount + ' bus' + (liveCount !== 1 ? 'es' : '') + ' live';
+      document.getElementById('stat-live-buses').textContent = liveCount;
+      document.getElementById('stat-total-buses').textContent = keys.length;
+    });
   }
 
-  function copyCode() {
-    if (!collegeCode) { toast('⚠️ No code to copy'); return; }
-    navigator.clipboard.writeText(collegeCode).then(() => toast('✅ Code copied!'));
-  }
-
-  async function regenerateCode() {
-    if (!confirm('Regenerate college code? Existing users will need to re-enter the new code.')) return;
-    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+  async function generateBus() {
+    const busNum = document.getElementById('gen-bus-num').value.trim();
+    const route  = document.getElementById('gen-route').value.trim();
+    const stops  = document.getElementById('gen-stops').value.trim();
+    const msg    = document.getElementById('gen-msg');
+    if (!busNum || !route) { msg.style.color='var(--red)'; msg.textContent='Bus number and route are required.'; return; }
+    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+    lastGenCode = code;
+    msg.style.color = 'var(--muted)'; msg.textContent = 'Saving bus...';
     try {
-      await usersDb.collection('colleges').doc(newCode).set({ name: 'College', code: newCode, createdAt: Date.now() });
-      await usersDb.collection('users').doc(currentUser.uid).update({ collegeCode: newCode });
-      // Also create the RTDB node
-      await rtdb.ref('colleges/' + newCode).set({ created: Date.now() });
-      collegeCode = newCode;
-      localStorage.setItem('ba_college_code', newCode);
-      document.getElementById('current-code-display').textContent = newCode;
-      document.getElementById('stat-code').textContent = newCode;
-      toast('✅ New code: ' + newCode);
-    } catch(e) { toast('❌ Error: ' + e.message); }
+      if (collegeCode) {
+        const busData = { busNumber: busNum, route: route, stops: stops ? stops.split(',').map(s=>s.trim()) : [], accessCode: code, createdAt: Date.now(), status: 'offline' };
+        await rtdb.ref('colleges/' + collegeCode + '/buses/' + busNum.replace(/\s+/g,'-')).set(busData);
+        await fsdb.collection('buses').doc(code).set(Object.assign({}, busData, { collegeCode }));
+      }
+      document.getElementById('gen-result-box').classList.remove('hidden');
+      document.getElementById('gen-code-display').textContent = code;
+      document.getElementById('gen-route-display').textContent = busNum + ' | ' + route;
+      msg.style.color = 'var(--green)'; msg.textContent = 'Bus created successfully!';
+      addToHistory('??', 'Bus Created: ' + busNum, 'Route: ' + route + ' | Code: ' + code);
+      loadBuses();
+    } catch(e) { msg.style.color='var(--red)'; msg.textContent='Error: ' + e.message; }
   }
 
-  async function createCollegeCode() {
-    const name = document.getElementById('college-name-input').value.trim();
-    const code = document.getElementById('college-code-new').value.trim().toUpperCase();
-    const msg = document.getElementById('college-msg');
-    if (!name || !code) { msg.style.color = 'var(--red)'; msg.textContent = '⚠️ Fill in all fields.'; return; }
-    if (code.length < 4) { msg.style.color = 'var(--red)'; msg.textContent = '⚠️ Code must be at least 4 characters.'; return; }
-    msg.style.color = 'var(--muted)'; msg.textContent = '⏳ Creating…';
+  function copyGenCode() {
+    if (!lastGenCode) return;
+    navigator.clipboard.writeText(lastGenCode).then(() => toast('Code copied: ' + lastGenCode));
+  }
+
+  function clearGenResult() {
+    document.getElementById('gen-result-box').classList.add('hidden');
+    document.getElementById('gen-bus-num').value = '';
+    document.getElementById('gen-route').value = '';
+    document.getElementById('gen-stops').value = '';
+    document.getElementById('gen-msg').textContent = '';
+    lastGenCode = '';
+  }
+
+  async function loadBuses() {
+    const container = document.getElementById('buses-container');
+    container.innerHTML = '<div class="empty-state"><div class="e-ico">...</div><p>Loading...</p></div>';
     try {
-      await usersDb.collection('colleges').doc(code).set({ name, code, createdAt: Date.now() });
-      await rtdb.ref('colleges/' + code).set({ name, created: Date.now() });
-      msg.style.color = 'var(--green)'; msg.textContent = `✅ College "${name}" created with code: ${code}`;
-      document.getElementById('college-name-input').value = '';
-      document.getElementById('college-code-new').value = '';
-      toast('✅ College code created!');
-    } catch(e) { msg.style.color = 'var(--red)'; msg.textContent = '❌ Error: ' + e.message; }
+      if (!collegeCode) { container.innerHTML = '<div class="empty-state"><div class="e-ico">??</div><p>No college code set.</p></div>'; return; }
+      const snap = await rtdb.ref('colleges/' + collegeCode + '/buses').once('value');
+      const buses = snap.val() || {};
+      const keys = Object.keys(buses);
+      if (!keys.length) { container.innerHTML = '<div class="empty-state"><div class="e-ico">??</div><p>No buses yet. Generate one above!</p></div>'; return; }
+      const rows = keys.map(k => {
+        const b = buses[k];
+        const loc = b.location || {};
+        const isLive = !!(loc.lat && loc.lon && loc.ts && (Date.now() - loc.ts < 5*60*1000));
+        const ts = loc.ts ? new Date(loc.ts).toLocaleTimeString() : '-';
+        return '<tr><td><div style="font-weight:700">' + (b.busNumber||k) + '</div><div style="font-size:.72rem;color:var(--muted)">' + (b.accessCode ? 'Code: '+b.accessCode : '') + '</div></td><td style="color:var(--muted);font-size:.78rem">' + (b.route||'-') + '</td><td><span class="badge ' + (isLive?'badge-live':'badge-off') + '">' + (isLive?'?? Live':'Offline') + '</span></td><td style="font-size:.72rem;color:var(--muted)">' + (isLive?ts:'-') + '</td><td><button onclick="deleteBus(\'' + k + '\')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:4px 10px;border-radius:8px;font-size:.72rem;cursor:pointer;font-family:Inter,sans-serif;">???</button></td></tr>';
+      }).join('');
+      container.innerHTML = '<div style="overflow-x:auto;"><table class="bus-table"><thead><tr><th>Bus</th><th>Route</th><th>Status</th><th>Updated</th><th>Del</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    } catch(e) { container.innerHTML = '<div class="empty-state"><div class="e-ico">?</div><p>' + e.message + '</p></div>'; }
   }
 
-  // ── LOGOUT ──
+  async function deleteBus(busKey) {
+    if (!confirm('Delete bus "' + busKey + '"? This cannot be undone.')) return;
+    try {
+      await rtdb.ref('colleges/' + collegeCode + '/buses/' + busKey).remove();
+      toast('Bus deleted.');
+      addToHistory('???', 'Bus Deleted: ' + busKey, 'Removed from fleet');
+      loadBuses();
+    } catch(e) { toast('Error: ' + e.message); }
+  }
+
+  function addToHistory(icon, title, sub) {
+    historyLog.unshift({ icon, title, sub, ts: Date.now() });
+    if (historyLog.length > 50) historyLog = historyLog.slice(0, 50);
+    localStorage.setItem('ba_admin_history', JSON.stringify(historyLog));
+  }
+
+  function loadHistory() {
+    const list = document.getElementById('history-list');
+    if (!historyLog.length) { list.innerHTML = '<div class="empty-state"><div class="e-ico">??</div><p>No history yet.</p></div>'; return; }
+    list.innerHTML = historyLog.map(h => {
+      const d = new Date(h.ts);
+      return '<div class="hist-item"><div class="hist-ico">' + h.icon + '</div><div style="flex:1;min-width:0;"><div class="hist-title">' + h.title + '</div><div class="hist-sub">' + h.sub + '</div></div><div class="hist-time">' + d.toLocaleDateString() + ' ' + d.toLocaleTimeString() + '</div></div>';
+    }).join('');
+  }
+
+  function clearHistory() {
+    if (!confirm('Clear all history?')) return;
+    historyLog = [];
+    localStorage.removeItem('ba_admin_history');
+    loadHistory();
+    toast('History cleared.');
+  }
+
+  function openProfile() { document.getElementById('profile-modal').classList.remove('hidden'); }
+  function closeProfile() { document.getElementById('profile-modal').classList.add('hidden'); }
+  function goToMainApp() { window.location.href = 'index.html'; }
   function doLogout() {
     localStorage.removeItem('ba_cached_role');
-    localStorage.removeItem('ba_college_code');
     auth.signOut().then(() => window.location.href = 'index.html');
   }
 
-  // ── TOAST ──
   let _toastTimer;
   function toast(msg) {
-    const el = document.getElementById('admin-toast');
+    const el = document.getElementById('toast');
     el.textContent = msg;
     el.classList.add('show');
     clearTimeout(_toastTimer);

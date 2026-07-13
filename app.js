@@ -2274,22 +2274,6 @@ window.addEventListener('appinstalled', () => {
   showToast('✅ BusAlert is installed as an app!');
 });
 
-// ─── ADMIN IFRAME LOGIC ──────────────────────────────────────────
-function openAdmin() {
-  const wrap = document.getElementById('admin-frame-wrap');
-  if (!wrap) return;
-  wrap.classList.remove('hidden');
-  document.getElementById('admin-iframe').src = 'admin.html';
-}
-
-function closeAdmin() {
-  const wrap = document.getElementById('admin-frame-wrap');
-  if (wrap) {
-    wrap.classList.add('hidden');
-    document.getElementById('admin-iframe').src = '';
-  }
-}
-
 // ─── AI ROUTE INSIGHTS ───────────────────────────────────────────
 async function fetchAIInsight() {
   const aiModal = document.getElementById('ai-modal');
@@ -2624,11 +2608,6 @@ function handleAuthSuccess(user) {
   q('#auth-screen').classList.add('hidden');
   q('#college-code-screen').classList.add('hidden');
 
-  // Admin users are redirected to the full admin portal
-  if (S.role === 'admin') {
-    window.location.href = 'admin.html';
-    return;
-  }
 
   // Check if student/driver still needs college code verification.
   // Prefer the in-memory value set by getRoleByUid (from Firestore),
