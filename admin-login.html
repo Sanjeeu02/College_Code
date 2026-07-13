@@ -50,7 +50,7 @@
     .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .loading-overlay p{font-size:0.85rem;color:var(--muted)}
-    .admin-note{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:12px 14px;font-size:0.78rem;color:#f59e0b;margin-bottom:20px;line-height:1.5}
+    .hidden{display:none!important}
   </style>
 </head>
 <body>
@@ -65,12 +65,15 @@
     <div class="role-badge">🛡️ Admin Login</div>
     <h1 class="login-title">Admin Portal</h1>
     <p class="login-sub">Sign in to manage buses, routes and your fleet</p>
-    <div class="admin-note">⚠️ Admin accounts must be pre-registered with the admin role by the system administrator.</div>
     <button class="google-btn" onclick="loginGoogle()">
       <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google"/>
       Continue with Google
     </button>
     <div class="divider">or sign in with email</div>
+    <div id="reg-name-wrap" class="field-group hidden">
+      <label>Full Name</label>
+      <input type="text" id="f-name" placeholder="Enter your name"/>
+    </div>
     <div class="field-group">
       <label>Email</label>
       <input type="email" id="f-email" placeholder="admin@example.com"/>
@@ -79,10 +82,14 @@
       <label>Password</label>
       <input type="password" id="f-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')submitAuth()"/>
     </div>
-    <button class="submit-btn" onclick="submitAuth()">Login to Admin Portal</button>
+    <div id="reg-confirm-wrap" class="field-group hidden">
+      <label>Confirm Password</label>
+      <input type="password" id="f-confirm" placeholder="••••••••"/>
+    </div>
+    <button class="submit-btn" id="submit-btn" onclick="submitAuth()">Login</button>
     <div class="err-msg" id="err-msg"></div>
     <div class="footer-links">
-      <p>Need admin access? Contact your system administrator.</p>
+      <p id="toggle-text">Don't have an account? <span onclick="toggleMode()">Sign up</span></p>
     </div>
   </div>
 </div>
@@ -92,6 +99,7 @@
   const auth=firebase.auth();
   const fsdb=firebase.firestore();
   const ROLE='admin';
+  let isReg=false;
 
   auth.onAuthStateChanged(async u=>{
     if(u){
@@ -107,9 +115,19 @@
 
   async function getRole(uid){try{const d=await fsdb.collection('users').doc(uid).get();return d.exists?d.data().role:null;}catch{return null;}}
   async function getCollegeCode(uid){try{const d=await fsdb.collection('users').doc(uid).get();return d.exists?d.data().collegeCode||null:null;}catch{return null;}}
-  function showLoad(msg){document.getElementById('loading-overlay').classList.remove('hidden');document.getElementById('loading-msg').textContent=msg||'Verifying admin access...';}
+  
+  function showLoad(msg){document.getElementById('loading-overlay').classList.remove('hidden');document.getElementById('loading-msg').textContent=msg||'Signing you in...';}
   function hideLoad(){document.getElementById('loading-overlay').classList.add('hidden');}
   function showErr(msg){document.getElementById('err-msg').innerHTML=msg;}
+
+  function toggleMode(){
+    isReg=!isReg;
+    document.getElementById('reg-name-wrap').classList.toggle('hidden',!isReg);
+    document.getElementById('reg-confirm-wrap').classList.toggle('hidden',!isReg);
+    document.getElementById('submit-btn').textContent=isReg?'Sign Up':'Login';
+    document.getElementById('toggle-text').innerHTML=isReg?'Already have an account? <span onclick="toggleMode()">Sign in</span>':"Don't have an account? <span onclick='toggleMode()'>Sign up</span>";
+    showErr('');
+  }
 
   async function loginGoogle(){
     showLoad('Signing in with Google...');
@@ -119,38 +137,63 @@
       const u=res.user;
       showLoad('Verifying admin access...');
       const storedRole=await getRole(u.uid);
-      if(storedRole!==ROLE){
+      
+      if(storedRole&&storedRole!==ROLE){
         await auth.signOut();
         hideLoad();
-        showErr('This account is not an admin. You are registered as: <b>'+(storedRole||'no role')+'</b>.<br>Contact your system administrator for admin access.');
+        showErr('This account is registered as <b>'+storedRole+'</b>. Use the correct role page.');
         return;
       }
+      
+      if(!storedRole){
+        await fsdb.collection('users').doc(u.uid).set({name:u.displayName||u.email,email:u.email,role:ROLE,createdAt:Date.now()});
+      }
+      
       localStorage.setItem('ba_cached_role',ROLE);
-      const cc=await getCollegeCode(u.uid);
-      if(cc)localStorage.setItem('ba_college_code',cc);
       window.location.href='admin.html';
-    }catch(e){hideLoad();if(e.code!=='auth/popup-closed-by-user')showErr('Error: '+e.message);}
+    }catch(e){
+      hideLoad();
+      if(e.code!=='auth/popup-closed-by-user')showErr('Error: '+e.message);
+    }
   }
 
   async function submitAuth(){
     const email=document.getElementById('f-email').value.trim();
     const pass=document.getElementById('f-pass').value;
     if(!email||!pass){showErr('Please enter email and password.');return;}
-    showLoad('Verifying admin access...');
+    
+    showLoad(isReg?'Creating admin account...':'Signing you in...');
     try{
-      const res=await auth.signInWithEmailAndPassword(email,pass);
-      const storedRole=await getRole(res.user.uid);
-      if(storedRole!==ROLE){
-        await auth.signOut();
-        hideLoad();
-        showErr('Access denied. This account is not an admin.<br>Your role: <b>'+(storedRole||'none')+'</b>.');
-        return;
+      if(isReg){
+        const name=document.getElementById('f-name').value.trim();
+        const confirm=document.getElementById('f-confirm').value;
+        if(!name){hideLoad();showErr('Enter your full name.');return;}
+        if(pass!==confirm){hideLoad();showErr('Passwords do not match.');return;}
+        
+        const res=await auth.createUserWithEmailAndPassword(email,pass);
+        await res.user.updateProfile({displayName:name});
+        await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
+        
+        localStorage.setItem('ba_cached_role',ROLE);
+        window.location.href='admin.html';
+      } else {
+        const res=await auth.signInWithEmailAndPassword(email,pass);
+        const storedRole=await getRole(res.user.uid);
+        if(storedRole!==ROLE){
+          await auth.signOut();
+          hideLoad();
+          showErr('Access denied. This account is not an admin.<br>Your role: <b>'+(storedRole||'none')+'</b>.');
+          return;
+        }
+        localStorage.setItem('ba_cached_role',ROLE);
+        const cc=await getCollegeCode(res.user.uid);
+        if(cc)localStorage.setItem('ba_college_code',cc);
+        window.location.href='admin.html';
       }
-      localStorage.setItem('ba_cached_role',ROLE);
-      const cc=await getCollegeCode(res.user.uid);
-      if(cc)localStorage.setItem('ba_college_code',cc);
-      window.location.href='admin.html';
-    }catch(e){hideLoad();showErr('Error: '+(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'?'Incorrect email or password.':e.message));}
+    }catch(e){
+      hideLoad();
+      showErr('Error: '+(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'?'Incorrect email or password.':e.message));
+    }
   }
 </script>
 </body>
