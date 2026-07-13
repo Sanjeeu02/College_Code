@@ -2395,6 +2395,8 @@ function showRoleScreen() {
 
 function selectRole(role) {
   S.selectedRole = role;
+  // Store the pending role so auth flow can use it
+  localStorage.setItem('ba_pending_role', role);
   q('#role-screen').classList.add('hidden');
   q('#auth-screen').classList.remove('hidden');
   // Reset auth mode
@@ -2630,6 +2632,13 @@ function handleAuthSuccess(user) {
   if (S.db && S.collegeCode) {
     S.db.ref('colleges/' + S.collegeCode + '/buses').off();
     startBusListener();
+  }
+
+  // Admins get redirected to the admin portal
+  if (S.role === 'admin') {
+    localStorage.setItem('ba_cached_role', 'admin');
+    window.location.href = 'admin.html';
+    return;
   }
 
   // Students and Drivers get the main app
