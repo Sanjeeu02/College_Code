@@ -1,0 +1,173 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>BusAlert — Driver Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#0f1117;--surface:#1a1d2e;--card:#222538;--accent:#00d2ff;--green:#22c55e;--red:#ef4444;--text:#e8eaf6;--muted:#8892b0;--border:rgba(255,255,255,0.08)}
+    body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;}
+    .bg-blobs{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+    .blob{position:absolute;border-radius:50%;filter:blur(80px);opacity:0.18}
+    .blob-1{width:500px;height:500px;background:#00d2ff;top:-100px;right:-150px;animation:drift1 12s ease-in-out infinite alternate}
+    .blob-2{width:400px;height:400px;background:#f59e0b;bottom:-80px;left:-100px;animation:drift2 10s ease-in-out infinite alternate}
+    .blob-3{width:300px;height:300px;background:#8b5cf6;top:40%;right:30%;animation:drift3 14s ease-in-out infinite alternate}
+    @keyframes drift1{from{transform:translate(0,0)}to{transform:translate(-60px,40px)}}
+    @keyframes drift2{from{transform:translate(0,0)}to{transform:translate(50px,-30px)}}
+    @keyframes drift3{from{transform:translate(0,0)}to{transform:translate(-30px,-50px)}}
+    .login-wrap{position:relative;z-index:1;width:100%;max-width:420px;padding:20px}
+    .back-btn{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:0.82rem;font-weight:600;cursor:pointer;margin-bottom:24px;text-decoration:none;transition:color 0.2s}
+    .back-btn:hover{color:var(--text)}
+    .login-card{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:32px;box-shadow:0 20px 60px rgba(0,0,0,0.5);position:relative}
+    .role-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(0,210,255,0.12);border:1px solid rgba(0,210,255,0.3);color:#00d2ff;padding:6px 14px;border-radius:99px;font-size:0.78rem;font-weight:700;margin-bottom:20px}
+    .login-title{font-size:1.6rem;font-weight:800;margin-bottom:4px}
+    .login-sub{font-size:0.82rem;color:var(--muted);margin-bottom:24px}
+    .google-btn{width:100%;padding:12px;background:#fff;color:#333;border:none;border-radius:12px;font-family:'Inter',sans-serif;font-size:0.88rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:opacity 0.2s,transform 0.15s;box-shadow:0 2px 12px rgba(0,0,0,0.3)}
+    .google-btn:hover{opacity:0.93;transform:translateY(-1px)}
+    .google-btn img{width:20px;height:20px}
+    .divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--muted);font-size:0.78rem}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
+    .field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+    .field-group label{font-size:0.75rem;font-weight:600;color:var(--muted)}
+    .field-group input{padding:11px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Inter',sans-serif;font-size:0.875rem;outline:none;transition:border-color 0.2s}
+    .field-group input:focus{border-color:var(--accent)}
+    .field-group input::placeholder{color:var(--muted)}
+    .submit-btn{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#00d2ff,#0284c7);color:#fff;font-family:'Inter',sans-serif;font-size:0.95rem;font-weight:700;cursor:pointer;transition:opacity 0.2s,transform 0.15s;margin-top:4px;box-shadow:0 4px 20px rgba(0,210,255,0.3)}
+    .submit-btn:hover{opacity:0.92;transform:translateY(-1px)}
+    .err-msg{font-size:0.8rem;color:var(--red);min-height:18px;margin-top:8px}
+    .footer-links{text-align:center;margin-top:20px;font-size:0.8rem;color:var(--muted)}
+    .footer-links span{color:var(--accent);cursor:pointer;font-weight:600}
+    .loading-overlay{position:absolute;inset:0;background:rgba(15,17,23,0.7);border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:10}
+    .loading-overlay.hidden{display:none}
+    .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loading-overlay p{font-size:0.85rem;color:var(--muted)}
+  </style>
+</head>
+<body>
+<div class="bg-blobs"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+<div class="login-wrap">
+  <a class="back-btn" href="index.html">← Back to Role Selection</a>
+  <div class="login-card">
+    <div class="loading-overlay hidden" id="loading-overlay">
+      <div class="spinner"></div>
+      <p id="loading-msg">Signing you in...</p>
+    </div>
+    <div class="role-badge">🚍 Driver Login</div>
+    <h1 class="login-title">Driver Portal</h1>
+    <p class="login-sub">Sign in to go live and share your bus location</p>
+    <button class="google-btn" onclick="loginGoogle()">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google"/>
+      Continue with Google
+    </button>
+    <div class="divider">or sign in with email</div>
+    <div id="reg-name-wrap" class="field-group hidden">
+      <label>Full Name</label>
+      <input type="text" id="f-name" placeholder="Enter your name"/>
+    </div>
+    <div class="field-group">
+      <label>Email</label>
+      <input type="email" id="f-email" placeholder="email@example.com"/>
+    </div>
+    <div class="field-group">
+      <label>Password</label>
+      <input type="password" id="f-pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')submitAuth()"/>
+    </div>
+    <div id="reg-confirm-wrap" class="field-group hidden">
+      <label>Confirm Password</label>
+      <input type="password" id="f-confirm" placeholder="••••••••"/>
+    </div>
+    <button class="submit-btn" id="submit-btn" onclick="submitAuth()">Login</button>
+    <div class="err-msg" id="err-msg"></div>
+    <div class="footer-links">
+      <p id="toggle-text">Don't have an account? <span onclick="toggleMode()">Sign up</span></p>
+    </div>
+  </div>
+</div>
+<script>
+  const FIREBASE_CFG={apiKey:"AIzaSyCQv4dhN6GtLeoOO5WEYpaFOTZFwy_wXMY",authDomain:"smartbustracker-ef456.firebaseapp.com",databaseURL:"https://smartbustracker-ef456-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"smartbustracker-ef456",storageBucket:"smartbustracker-ef456.firebasestorage.app",messagingSenderId:"686712758756",appId:"1:686712758756:web:b671be77184b0f4bf9a7f1"};
+  firebase.initializeApp(FIREBASE_CFG);
+  const auth=firebase.auth();
+  const fsdb=firebase.firestore();
+  const ROLE='driver';
+  let isReg=false;
+
+  auth.onAuthStateChanged(async u=>{
+    if(u){
+      const role=await getRole(u.uid);
+      if(role===ROLE){
+        localStorage.setItem('ba_cached_role',ROLE);
+        const cc=await getCollegeCode(u.uid);
+        if(cc)localStorage.setItem('ba_college_code',cc);
+        window.location.href='index.html';
+      }
+    }
+  });
+
+  async function getRole(uid){try{const d=await fsdb.collection('users').doc(uid).get();return d.exists?d.data().role:null;}catch{return null;}}
+  async function getCollegeCode(uid){try{const d=await fsdb.collection('users').doc(uid).get();return d.exists?d.data().collegeCode||null:null;}catch{return null;}}
+  function showLoad(msg){document.getElementById('loading-overlay').classList.remove('hidden');document.getElementById('loading-msg').textContent=msg||'Signing you in...';}
+  function hideLoad(){document.getElementById('loading-overlay').classList.add('hidden');}
+  function showErr(msg){document.getElementById('err-msg').innerHTML=msg;}
+
+  function toggleMode(){
+    isReg=!isReg;
+    document.getElementById('reg-name-wrap').classList.toggle('hidden',!isReg);
+    document.getElementById('reg-confirm-wrap').classList.toggle('hidden',!isReg);
+    document.getElementById('submit-btn').textContent=isReg?'Sign Up':'Login';
+    document.getElementById('toggle-text').innerHTML=isReg?'Already have an account? <span onclick="toggleMode()">Sign in</span>':"Don't have an account? <span onclick='toggleMode()'>Sign up</span>";
+    showErr('');
+  }
+
+  async function loginGoogle(){
+    showLoad('Signing you in with Google...');
+    try{
+      const provider=new firebase.auth.GoogleAuthProvider();
+      const res=await auth.signInWithPopup(provider);
+      const u=res.user;
+      const storedRole=await getRole(u.uid);
+      if(storedRole&&storedRole!==ROLE){await auth.signOut();hideLoad();showErr('This account is registered as <b>'+storedRole+'</b>. Use the correct role page.');return;}
+      if(!storedRole){await fsdb.collection('users').doc(u.uid).set({name:u.displayName||u.email,email:u.email,role:ROLE,createdAt:Date.now()});}
+      localStorage.setItem('ba_cached_role',ROLE);
+      window.location.href='index.html';
+    }catch(e){hideLoad();if(e.code!=='auth/popup-closed-by-user')showErr('Error: '+e.message);}
+  }
+
+  async function submitAuth(){
+    const email=document.getElementById('f-email').value.trim();
+    const pass=document.getElementById('f-pass').value;
+    if(!email||!pass){showErr('Please enter email and password.');return;}
+    showLoad(isReg?'Creating your account...':'Signing you in...');
+    try{
+      if(isReg){
+        const name=document.getElementById('f-name').value.trim();
+        const confirm=document.getElementById('f-confirm').value;
+        if(!name){hideLoad();showErr('Enter your full name.');return;}
+        if(pass!==confirm){hideLoad();showErr('Passwords do not match.');return;}
+        const res=await auth.createUserWithEmailAndPassword(email,pass);
+        await res.user.updateProfile({displayName:name});
+        await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
+        localStorage.setItem('ba_cached_role',ROLE);
+        window.location.href='index.html';
+      }else{
+        const res=await auth.signInWithEmailAndPassword(email,pass);
+        const storedRole=await getRole(res.user.uid);
+        if(storedRole&&storedRole!==ROLE){await auth.signOut();hideLoad();showErr('This account is a <b>'+storedRole+'</b>. Use the correct login page.');return;}
+        localStorage.setItem('ba_cached_role',ROLE);
+        const cc=await getCollegeCode(res.user.uid);
+        if(cc)localStorage.setItem('ba_college_code',cc);
+        window.location.href='index.html';
+      }
+    }catch(e){hideLoad();showErr('Error: '+(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'?'Incorrect email or password.':e.message));}
+  }
+</script>
+</body>
+</html>
