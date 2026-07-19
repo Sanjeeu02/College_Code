@@ -1,0 +1,225 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>BusAlert College Code</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#0f1117;--surface:#1a1d2e;--card:#222538;--text:#e8eaf6;--muted:#8892b0;--border:rgba(255,255,255,0.08);--red:#ef4444;--green:#22c55e;--accent:#6c63ff}
+    body{font-family:"Inter",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .bg-blobs{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+    .blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:0.13}
+    .blob-1{width:550px;height:550px;background:#6c63ff;top:-150px;left:-200px;animation:drift1 13s ease-in-out infinite alternate}
+    .blob-2{width:420px;height:420px;background:#f59e0b;bottom:-100px;right:-150px;animation:drift2 11s ease-in-out infinite alternate}
+    .blob-3{width:320px;height:320px;background:#10b981;top:35%;right:15%;animation:drift3 15s ease-in-out infinite alternate}
+    @keyframes drift1{from{transform:translate(0,0)}to{transform:translate(70px,50px)}}
+    @keyframes drift2{from{transform:translate(0,0)}to{transform:translate(-60px,-40px)}}
+    @keyframes drift3{from{transform:translate(0,0)}to{transform:translate(35px,-55px)}}
+    .cc-wrap{position:relative;z-index:1;width:100%;max-width:440px;padding:20px}
+    .cc-logo{text-align:center;margin-bottom:28px}
+    .cc-logo-icon{font-size:2.6rem;display:block;margin-bottom:6px;animation:bounce 2s ease-in-out infinite}
+    @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    .cc-logo-brand{font-size:1.4rem;font-weight:800;letter-spacing:-0.5px}
+    .cc-card{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:36px 32px;box-shadow:0 24px 70px rgba(0,0,0,0.55),0 0 0 1px rgba(255,255,255,0.04);position:relative;overflow:hidden}
+    .cc-card::before{content:"";position:absolute;inset:0;border-radius:24px;background:linear-gradient(135deg,rgba(255,255,255,0.04) 0%,transparent 60%);pointer-events:none}
+    .role-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:99px;font-size:0.74rem;font-weight:700;margin-bottom:18px;border:1px solid}
+    .role-badge.admin{background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.35);color:#f59e0b}
+    .role-badge.student{background:rgba(108,99,255,0.12);border-color:rgba(108,99,255,0.35);color:#a79fff}
+    .role-badge.driver{background:rgba(0,210,255,0.12);border-color:rgba(0,210,255,0.35);color:#00d2ff}
+    .cc-title{font-size:1.65rem;font-weight:800;margin-bottom:6px;line-height:1.2}
+    .cc-sub{font-size:0.83rem;color:var(--muted);margin-bottom:26px;line-height:1.5}
+    .info-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;font-size:0.8rem;color:var(--muted);line-height:1.5;margin-bottom:22px;display:flex;gap:10px;align-items:flex-start}
+    .info-icon{font-size:1.1rem;flex-shrink:0;margin-top:1px}
+    .field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+    .field-group label{font-size:0.74rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+    .cc-input{width:100%;padding:13px 16px;background:var(--card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-family:"Inter",sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:3px;text-transform:uppercase;outline:none;transition:border-color 0.2s,box-shadow 0.2s}
+    .cc-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,99,255,0.15)}
+    .cc-input::placeholder{color:var(--muted);letter-spacing:1px;font-weight:400;font-size:0.9rem}
+    .cc-input.error{border-color:var(--red)}
+    .cc-input.success{border-color:var(--green)}
+    .submit-btn{width:100%;padding:14px;border-radius:13px;border:none;font-family:"Inter",sans-serif;font-size:0.97rem;font-weight:700;cursor:pointer;transition:opacity 0.2s,transform 0.15s;margin-top:4px}
+    .submit-btn:hover:not(:disabled){opacity:0.92;transform:translateY(-1px)}
+    .submit-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+    .submit-btn.admin-style{background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;box-shadow:0 4px 20px rgba(245,158,11,0.35)}
+    .submit-btn.student-style{background:linear-gradient(135deg,#6c63ff,#4f46e5);color:#fff;box-shadow:0 4px 20px rgba(108,99,255,0.35)}
+    .submit-btn.driver-style{background:linear-gradient(135deg,#00d2ff,#0284c7);color:#fff;box-shadow:0 4px 20px rgba(0,210,255,0.3)}
+    .msg-area{min-height:20px;font-size:0.82rem;margin-top:10px;line-height:1.4;text-align:center}
+    .msg-area.err{color:var(--red)}
+    .msg-area.ok{color:var(--green)}
+    .loading-overlay{position:absolute;inset:0;background:rgba(15,17,23,0.78);border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:10}
+    .loading-overlay.hidden{display:none}
+    .spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loading-overlay p{font-size:0.85rem;color:var(--muted);font-weight:500}
+    .cc-footer{text-align:center;margin-top:20px;font-size:0.78rem;color:var(--muted)}
+    .cc-footer a{color:var(--accent);text-decoration:none;font-weight:600;cursor:pointer}
+    .cc-footer a:hover{text-decoration:underline}
+    .step-indicator{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:22px}
+    .step{display:flex;align-items:center;gap:6px;font-size:0.74rem;font-weight:600;color:var(--muted)}
+    .step.done .step-dot{background:var(--green);border-color:var(--green);color:#fff}
+    .step.active .step-dot{background:var(--accent);border-color:var(--accent);color:#fff}
+    .step-dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700}
+    .step-line{flex:1;height:1px;background:var(--border);max-width:40px}
+    .hidden{display:none!important}
+  </style>
+</head>
+<body>
+<div class="bg-blobs">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+</div>
+<div class="cc-wrap">
+  <div class="cc-logo">
+    <span class="cc-logo-icon">&#x1F68C;</span>
+    <div class="cc-logo-brand">BusAlert</div>
+  </div>
+  <div class="cc-card">
+    <div class="loading-overlay hidden" id="loading-overlay">
+      <div class="spinner"></div>
+      <p id="loading-msg">Verifying...</p>
+    </div>
+    <div class="step-indicator">
+      <div class="step done"><div class="step-dot">&#10003;</div><span>Signed In</span></div>
+      <div class="step-line"></div>
+      <div class="step active"><div class="step-dot">2</div><span>College Code</span></div>
+      <div class="step-line"></div>
+      <div class="step"><div class="step-dot">3</div><span>Dashboard</span></div>
+    </div>
+    <div id="role-badge-wrap"></div>
+    <h1 class="cc-title" id="cc-title">Loading...</h1>
+    <p class="cc-sub" id="cc-sub"></p>
+    <div class="info-box">
+      <span class="info-icon">&#x2139;&#xFE0F;</span>
+      <span id="info-text"></span>
+    </div>
+    <div class="field-group">
+      <label id="cc-label">College Code</label>
+      <input type="text" class="cc-input" id="cc-input" placeholder="e.g. SRM2024"
+        maxlength="20" autocomplete="off" spellcheck="false"
+        oninput="onCCInput()" onkeydown="if(event.key==='Enter')submitCC()"/>
+    </div>
+    <button class="submit-btn" id="submit-btn" onclick="submitCC()">Continue</button>
+    <div class="msg-area" id="msg-area"></div>
+  </div>
+  <div class="cc-footer">
+    <p>Wrong account? <a onclick="signOutAndReturn()">Sign out</a></p>
+  </div>
+</div>
+<script>
+  const FIREBASE_CFG={apiKey:"AIzaSyCQv4dhN6GtLeoOO5WEYpaFOTZFwy_wXMY",authDomain:"smartbustracker-ef456.firebaseapp.com",databaseURL:"https://smartbustracker-ef456-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"smartbustracker-ef456",storageBucket:"smartbustracker-ef456.firebasestorage.app",messagingSenderId:"686712758756",appId:"1:686712758756:web:b671be77184b0f4bf9a7f1"};
+  firebase.initializeApp(FIREBASE_CFG);
+  const auth=firebase.auth();
+  const fsdb=firebase.firestore();
+  const ROLE=localStorage.getItem("ba_cached_role")||"student";
+  const IS_ADMIN=ROLE==="admin";
+  const accentColor=IS_ADMIN?"#f59e0b":(ROLE==="driver"?"#00d2ff":"#6c63ff");
+  document.documentElement.style.setProperty("--accent",accentColor);
+
+  function initUI(){
+    const icons={admin:"🛡️",student:"🎓",driver:"🚍"};
+    const labels={admin:"Admin",student:"Student",driver:"Driver"};
+    document.getElementById("role-badge-wrap").innerHTML=`<div class="role-badge ${ROLE}">${icons[ROLE]||"👤"} ${labels[ROLE]||ROLE}</div>`;
+    if(IS_ADMIN){
+      document.getElementById("cc-title").textContent="Create Your College Code";
+      document.getElementById("cc-sub").textContent="Choose a unique code that your students and drivers will use to join your college fleet.";
+      document.getElementById("info-text").textContent="Pick a memorable code (e.g. SRM2024). Once created, share it with your students and drivers so they can join.";
+      document.getElementById("cc-label").textContent="New College Code";
+      document.getElementById("cc-input").placeholder="e.g. SRM2024";
+      document.getElementById("submit-btn").textContent="🚀 Create College";
+      document.getElementById("submit-btn").classList.add("admin-style");
+    } else if(ROLE==="driver"){
+      document.getElementById("cc-title").textContent="Enter College Code";
+      document.getElementById("cc-sub").textContent="Your admin has a College Code for your institution. Enter it below to join your fleet.";
+      document.getElementById("info-text").textContent="Contact your college admin for the College Code. It links your driver account to the correct fleet.";
+      document.getElementById("cc-label").textContent="College Code";
+      document.getElementById("submit-btn").textContent="🚍 Join Fleet";
+      document.getElementById("submit-btn").classList.add("driver-style");
+    } else {
+      document.getElementById("cc-title").textContent="Enter College Code";
+      document.getElementById("cc-sub").textContent="Your college admin will have shared a College Code. Enter it below to access your bus tracking dashboard.";
+      document.getElementById("info-text").textContent="Ask your college admin or check your college notice board for the College Code.";
+      document.getElementById("cc-label").textContent="College Code";
+      document.getElementById("submit-btn").textContent="🎓 Join College";
+      document.getElementById("submit-btn").classList.add("student-style");
+    }
+  }
+
+  function showLoad(msg){document.getElementById("loading-overlay").classList.remove("hidden");document.getElementById("loading-msg").textContent=msg||"Verifying...";document.getElementById("submit-btn").disabled=true;}
+  function hideLoad(){document.getElementById("loading-overlay").classList.add("hidden");document.getElementById("submit-btn").disabled=false;}
+  function showErr(msg){const el=document.getElementById("msg-area");el.textContent=msg;el.className="msg-area err";document.getElementById("cc-input").classList.add("error");document.getElementById("cc-input").classList.remove("success");}
+  function showOk(msg){const el=document.getElementById("msg-area");el.textContent=msg;el.className="msg-area ok";document.getElementById("cc-input").classList.add("success");document.getElementById("cc-input").classList.remove("error");}
+  function clearMsg(){document.getElementById("msg-area").textContent="";document.getElementById("msg-area").className="msg-area";document.getElementById("cc-input").classList.remove("error","success");}
+
+  function onCCInput(){
+    const el=document.getElementById("cc-input");
+    el.value=el.value.replace(/[^A-Za-z0-9_\-]/g,"").toUpperCase();
+    clearMsg();
+  }
+
+  auth.onAuthStateChanged(async(user)=>{
+    if(!user){window.location.href="index.html";return;}
+    try{
+      const doc=await fsdb.collection("users").doc(user.uid).get();
+      if(doc.exists&&doc.data().collegeCode){
+        localStorage.setItem("ba_college_code",doc.data().collegeCode);
+        redirectToDashboard();return;
+      }
+    }catch(e){console.warn("CC prefetch error:",e);}
+    initUI();
+  });
+
+  async function submitCC(){
+    const code=document.getElementById("cc-input").value.trim().toUpperCase();
+    if(!code){showErr("Please enter a College Code.");return;}
+    if(code.length<3){showErr("Code must be at least 3 characters.");return;}
+    const user=auth.currentUser;
+    if(!user){showErr("Session expired. Please log in again.");return;}
+    if(IS_ADMIN){await createCollegeCode(user,code);}else{await joinCollegeCode(user,code);}
+  }
+
+  async function createCollegeCode(user,code){
+    showLoad("Checking availability...");
+    try{
+      const doc=await fsdb.collection("colleges").doc(code).get();
+      if(doc.exists){hideLoad();showErr("College Code \""+code+"\" is already in use. Choose a different one.");return;}
+      showLoad("Creating your college...");
+      await fsdb.collection("colleges").doc(code).set({name:code,createdBy:user.uid,createdAt:Date.now()});
+      await fsdb.collection("users").doc(user.uid).update({collegeCode:code});
+      localStorage.setItem("ba_college_code",code);
+      showOk("College \""+code+"\" created! Redirecting...");
+      setTimeout(()=>{window.location.href="admin.html";},1200);
+    }catch(e){hideLoad();showErr("Error: "+e.message);}
+  }
+
+  async function joinCollegeCode(user,code){
+    showLoad("Verifying College Code...");
+    try{
+      const doc=await fsdb.collection("colleges").doc(code).get();
+      if(!doc.exists){hideLoad();showErr("Invalid College Code. Please check with your admin.");return;}
+      showLoad("Joining college...");
+      await fsdb.collection("users").doc(user.uid).update({collegeCode:code});
+      localStorage.setItem("ba_college_code",code);
+      showOk("Joined! Redirecting to your dashboard...");
+      setTimeout(()=>{redirectToDashboard();},1000);
+    }catch(e){hideLoad();showErr("Error: "+e.message);}
+  }
+
+  function redirectToDashboard(){window.location.href=IS_ADMIN?"admin.html":"index.html";}
+
+  async function signOutAndReturn(){
+    localStorage.removeItem("ba_cached_role");
+    localStorage.removeItem("ba_college_code");
+    await auth.signOut();
+    window.location.href="index.html";
+  }
+</script>
+</body>
+</html>

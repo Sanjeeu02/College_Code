@@ -2606,11 +2606,32 @@ async function loginWithGoogle() {
 function handleAuthSuccess(user) {
   q('#role-screen').classList.add('hidden');
   q('#auth-screen').classList.add('hidden');
+
+  // ── Restore college code from cache if not already in S ──
   if (S.role !== 'admin') {
     const cachedCode = localStorage.getItem('ba_college_code');
     if (!S.collegeCode && cachedCode) {
       S.collegeCode = cachedCode;
     }
+  }
+
+  // ── Admins get redirected to the admin portal ──
+  if (S.role === 'admin') {
+    localStorage.setItem('ba_cached_role', 'admin');
+    // If admin has no CC yet, go to college-code screen to create one
+    if (!S.collegeCode) {
+      window.location.href = 'college-code.html';
+      return;
+    }
+    window.location.href = 'admin.html';
+    return;
+  }
+
+  // ── Students / Drivers: require a college code before accessing the app ──
+  if (!S.collegeCode) {
+    // No college code yet — must go through the CC setup screen
+    window.location.href = 'college-code.html';
+    return;
   }
 
   // Restart the bus listener with the correct college path
@@ -2619,19 +2640,13 @@ function handleAuthSuccess(user) {
     startBusListener();
   }
 
-  // Admins get redirected to the admin portal
-  if (S.role === 'admin') {
-    localStorage.setItem('ba_cached_role', 'admin');
-    window.location.href = 'admin.html';
-    return;
-  }
-
   // Students and Drivers get the main app
   q('#app').classList.remove('hidden');
   updateUIByRole();
   renderProfileInfo();
   showToast(`👋 Welcome back, ${user.displayName || 'User'}!`);
 }
+
 
 
 

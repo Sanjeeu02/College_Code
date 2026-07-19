@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -107,8 +107,13 @@
       if(role===ROLE){
         localStorage.setItem('ba_cached_role',ROLE);
         const cc=await getCollegeCode(u.uid);
-        if(cc)localStorage.setItem('ba_college_code',cc);
-        window.location.href='admin.html';
+        if(cc){
+          localStorage.setItem('ba_college_code',cc);
+          window.location.href='admin.html';
+        } else {
+          // No college code yet — send to CC setup screen
+          window.location.href='college-code.html';
+        }
       }
     }
   });
@@ -146,11 +151,19 @@
       }
       
       if(!storedRole){
+        // New Google user — create account without college code (CC step comes next)
         await fsdb.collection('users').doc(u.uid).set({name:u.displayName||u.email,email:u.email,role:ROLE,createdAt:Date.now()});
       }
       
       localStorage.setItem('ba_cached_role',ROLE);
-      window.location.href='admin.html';
+      // Check if CC already exists; if so go straight to admin, else go to CC screen
+      const cc=await getCollegeCode(u.uid);
+      if(cc){
+        localStorage.setItem('ba_college_code',cc);
+        window.location.href='admin.html';
+      } else {
+        window.location.href='college-code.html';
+      }
     }catch(e){
       hideLoad();
       if(e.code!=='auth/popup-closed-by-user')showErr('Error: '+e.message);
@@ -170,12 +183,13 @@
         if(!name){hideLoad();showErr('Enter your full name.');return;}
         if(pass!==confirm){hideLoad();showErr('Passwords do not match.');return;}
         
+        // Create account WITHOUT college code — CC entry is the next step
         const res=await auth.createUserWithEmailAndPassword(email,pass);
         await res.user.updateProfile({displayName:name});
         await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
         
         localStorage.setItem('ba_cached_role',ROLE);
-        window.location.href='admin.html';
+        window.location.href='college-code.html';
       } else {
         const res=await auth.signInWithEmailAndPassword(email,pass);
         const storedRole=await getRole(res.user.uid);
@@ -187,8 +201,13 @@
         }
         localStorage.setItem('ba_cached_role',ROLE);
         const cc=await getCollegeCode(res.user.uid);
-        if(cc)localStorage.setItem('ba_college_code',cc);
-        window.location.href='admin.html';
+        if(cc){
+          localStorage.setItem('ba_college_code',cc);
+          window.location.href='admin.html';
+        } else {
+          // Logged in but no CC yet — go to CC setup screen
+          window.location.href='college-code.html';
+        }
       }
     }catch(e){
       hideLoad();
