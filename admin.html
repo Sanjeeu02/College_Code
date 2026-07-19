@@ -450,15 +450,39 @@
     
     if (!busNum || !route) { msg.style.color='var(--red)'; msg.textContent='Bus number and route are required.'; return; }
     
+    // ── DEDUP FIX: Use a stable, canonical key derived from busNumber ──
+    // This ensures the driver always writes to the same node the admin created.
+    // Format: lowercase, spaces → dashes. e.g. "Bus 101" → "bus-101"
+    const busKey = busNum.trim().replace(/\s+/g, '-').toLowerCase();
+
+    // Check if this bus already exists — prevent duplicate bus entries
+    const existing = await rtdb.ref('colleges/' + collegeCode + '/buses/' + busKey).once('value');
+    if (existing.exists()) {
+      msg.style.color = 'var(--red)';
+      msg.textContent = 'A bus with this number already exists. Use a unique bus number.';
+      return;
+    }
+
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     lastGenCode = code;
     msg.style.color = 'var(--muted)'; msg.textContent = 'Saving bus...';
     
     try {
       if (collegeCode) {
-        const busData = { busNumber: busNum, route: route, stops: stops ? stops.split(',').map(s=>s.trim()) : [], accessCode: code, createdAt: Date.now(), status: 'offline' };
-        await rtdb.ref('colleges/' + collegeCode + '/buses/' + busNum.replace(/\s+/g,'-')).set(busData);
-        await fsdb.collection('buses').doc(code).set(Object.assign({}, busData, { collegeCode }));
+        // Store busKey INSIDE the document so driver can read it via profileId
+        const busData = {
+          busNumber: busNum,
+          busKey: busKey,           // ← stable key stored in document
+          route: route,
+          stops: stops ? stops.split(',').map(s=>s.trim()) : [],
+          accessCode: code,
+          createdAt: Date.now(),
+          active: false,
+          collegeCode: collegeCode
+        };
+        // Use the canonical busKey as the Firebase key (not busNum directly)
+        await rtdb.ref('colleges/' + collegeCode + '/buses/' + busKey).set(busData);
+        await fsdb.collection('buses').doc(code).set(busData);
       }
       document.getElementById('gen-result-box').classList.remove('hidden');
       document.getElementById('gen-code-display').textContent = code;
@@ -468,6 +492,7 @@
       loadBuses();
     } catch(e) { msg.style.color='var(--red)'; msg.textContent='Error: ' + e.message; }
   }
+
 
   function copyGenCode() {
     if (!lastGenCode) return;

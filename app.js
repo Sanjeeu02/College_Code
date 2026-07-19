@@ -570,9 +570,25 @@ function renderBusList(query = '') {
   const ql = query.toLowerCase();
   const list = q('#bus-list'), empty = q('#bus-empty');
 
-  const matches = Object.entries(S.allBuses).filter(([, b]) => {
-    if (!ql) return true; // Show all buses if no query
+  // ── DEDUP FIX: Deduplicate entries by accessCode before rendering.
+  // If somehow two Firebase nodes share the same accessCode (e.g. one old static
+  // entry + one active driver entry), keep only the most recently updated one.
+  const seen = new Map();
+  Object.entries(S.allBuses).forEach(([id, b]) => {
+    const key = b.accessCode || id;
+    const existing = seen.get(key);
+    const thisTs = b.location?.timestamp || b.startedAt || 0;
+    const existTs = existing ? (existing.b.location?.timestamp || existing.b.startedAt || 0) : -1;
+    // Prefer the active entry; if tied, prefer the more recently updated
+    const thisActive = b.active ? 1 : 0;
+    const existActive = existing ? (existing.b.active ? 1 : 0) : -1;
+    if (!existing || thisActive > existActive || (thisActive === existActive && thisTs > existTs)) {
+      seen.set(key, { id, b });
+    }
+  });
 
+  const matches = [...seen.values()].filter(({ b }) => {
+    if (!ql) return true;
     return (b.route || '').toLowerCase().includes(ql)
       || (b.busNumber || '').toLowerCase().includes(ql)
       || (b.stops || []).some(s => s.toLowerCase().includes(ql));
@@ -590,10 +606,11 @@ function renderBusList(query = '') {
   empty.classList.add('hidden');
   list.classList.remove('hidden');
 
-  list.innerHTML = matches.map(([id, b]) => {
+  // ── Online/Offline: bus is live if active=true AND location updated within 60s
+  list.innerHTML = matches.map(({ id, b }) => {
     let isOffline = !b.active;
     if (!isOffline && b.location?.timestamp) {
-      if ((Date.now() - b.location.timestamp) > 15 * 60 * 1000) isOffline = true;
+      if ((Date.now() - b.location.timestamp) > 60 * 1000) isOffline = true; // 60s timeout
     }
     const trackText = isOffline ? 'Offline' : (S.trackedId === id && S.trackOn ? '📡 Tracking' : 'Track');
     
@@ -1484,13 +1501,18 @@ function startDriver(resuming = false) {
   }
   if (!S.fbOk) { showToast('⏳ Firebase not connected yet.'); return; }
 
-  const { busNumber: num, route, stops, accessCode, createdBy } = _driverProfile;
+  const { busNumber: num, route, stops, accessCode, createdBy, profileId } = _driverProfile;
 
-  // The student tracking code is the SAME as the admin/driver code
   S.driverAccessCode = accessCode;
+
+  // ── DEDUP FIX: Use the admin-created stable Firebase key as driverBusId.
+  // profileId IS the Firebase key that admin used (e.g. "bus-101").
+  // This ensures every GPS update goes to the SAME node admin created,
+  // instead of creating a new bus_NUM_TIMESTAMP entry on every session.
   if (!resuming) {
-    S.driverBusId = 'bus_' + num.replace(/\s+/g, '_').toUpperCase() + '_' + Date.now();
+    S.driverBusId = profileId; // ← stable key, NOT 'bus_' + num + '_' + Date.now()
   }
+
   S.driverUpdates = 0;
 
   // ── BUG FIX: Clear offline GPS queue from any PREVIOUS trip.
@@ -1523,11 +1545,13 @@ function startDriver(resuming = false) {
   if (!resuming) showToast(`🟢 LIVE: Bus ${num} | Student Code: ${accessCode}`);
   else showToast(`🔄 Resumed: Bus ${num}`);
 
-  // Automatically stop/hide the bus on the admin map if the driver closes the web page or loses connection
-  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().update({ active: false });
+  // On disconnect: mark bus as inactive (do NOT delete — preserves admin's record)
+  S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().update({
+    active: false,
+    stoppedAt: Date.now()
+  });
 
-  // Explicitly set the entire payload to true immediately before waiting for GPS. 
-  // We use .update() so we don't accidentally wipe location data if this is a resume
+  // Mark bus live immediately before GPS lock; update() keeps existing fields intact
   S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
     busNumber: num,
     route: route || '',
@@ -1535,8 +1559,12 @@ function startDriver(resuming = false) {
     active: true,
     startedAt: Date.now(),
     accessCode: accessCode,
+    collegeCode: S.collegeCode,
     createdBy: createdBy || 'admin'
   });
+
+  // Reset GPS write throttle for the new session
+  _lastPushTime = 0;
 
   requestWakeLock();
   startRobustDriverWatch();
@@ -1686,9 +1714,18 @@ function stopDriver() {
   releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
+
   if (S.db && S.driverBusId) {
     S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().cancel();
-    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).remove();
+    // ── DEDUP FIX: Mark bus INACTIVE instead of deleting it.
+    // Deleting the node left the admin's static entry as a ghost "offline" card.
+    // Updating active:false + clearing location preserves the fleet record while
+    // correctly showing the bus as offline on the student & admin views.
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
+      active: false,
+      location: null,       // clear GPS coords so bus disappears from map
+      stoppedAt: Date.now()
+    });
   }
 
   // Clear session
@@ -1711,6 +1748,8 @@ function stopDriver() {
 }
 
 let _lastMoved, _lastLat, _lastLon;
+let _lastPushTime = 0;                    // GPS write throttle timestamp
+const GPS_PUSH_INTERVAL_MS = 5000;        // push to Firebase at most every 5 seconds
 let _offlineGpsQueue = JSON.parse(localStorage.getItem('ba_offline_gps') || '[]');
 
 // Auto-sync offline cache when connection restores
@@ -1736,14 +1775,10 @@ function onDriverPos(pos) {
   if (!lat || !lon || (lat === 0 && lon === 0)) return;
 
   // ── BUG FIX 2: Accuracy filter — skip low-quality first GPS fixes ──
-  // The browser's GPS often delivers a wildly inaccurate position (100–5000m off)
-  // for the first 1–3 seconds while the hardware locks on. Pushing those to
-  // Firebase is what caused the "wrong location" symptom on the student map.
   if (accuracy > GPS_ACCURACY_THRESHOLD) {
     console.warn(`⚠️ GPS fix rejected (accuracy ${Math.round(accuracy)}m > ${GPS_ACCURACY_THRESHOLD}m threshold). Waiting for better signal.`);
-    // Show a non-blocking warning in the driver UI
     q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ⚠️';
-    return; // Do NOT push to Firebase
+    return;
   }
   
   const now = Date.now();
@@ -1761,6 +1796,12 @@ function onDriverPos(pos) {
   q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ✅';
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+  // ── GPS THROTTLE: Write to Firebase at most once every 5 seconds ──
+  // GPS events can fire every 1-2 seconds; pushing every tick wastes bandwidth
+  // and can cause duplicate/out-of-order updates in the Realtime Database.
+  if (now - _lastPushTime < GPS_PUSH_INTERVAL_MS) return;
+  _lastPushTime = now;
   
   const payload = {
     active: true,
