@@ -430,9 +430,11 @@
       keys.forEach(k => {
         const b = buses[k];
         const loc = b.location || {};
+        const isLive = !!(b.active && loc.lat && loc.lon && loc.ts && (Date.now() - loc.ts < 5*60*1000));
+        
         if (loc.lat && loc.lon) {
-          liveCount++;
-          const marker = L.marker([loc.lat, loc.lon], { icon: createBusIcon(true) })
+          if (isLive) liveCount++;
+          const marker = L.marker([loc.lat, loc.lon], { icon: createBusIcon(isLive) })
             .bindPopup('<b>' + k + '</b><br>Route: ' + (b.route || '-') + '<br>Updated: ' + (loc.ts ? new Date(loc.ts).toLocaleTimeString() : '-'))
             .addTo(adminMap);
           mapMarkers[k] = marker;
@@ -526,7 +528,7 @@
       const rows = keys.map(k => {
         const b = buses[k];
         const loc = b.location || {};
-        const isLive = !!(loc.lat && loc.lon && loc.ts && (Date.now() - loc.ts < 5*60*1000));
+        const isLive = !!(b.active && loc.lat && loc.lon && loc.ts && (Date.now() - loc.ts < 5*60*1000));
         const ts = loc.ts ? new Date(loc.ts).toLocaleTimeString() : '-';
         return '<tr><td><div style="font-weight:700">' + (b.busNumber||k) + '</div><div style="font-size:.72rem;color:var(--muted)">' + (b.accessCode ? 'Code: '+b.accessCode : '') + '</div></td><td style="color:var(--muted);font-size:.78rem">' + (b.route||'-') + '</td><td><span class="badge ' + (isLive?'badge-live':'badge-off') + '" style="color:'+(isLive?'var(--green)':'var(--muted)')+'">' + (isLive?'🟢 Live':'Offline') + '</span></td><td style="font-size:.72rem;color:var(--muted)">' + (isLive?ts:'-') + '</td><td><button onclick="deleteBus(\'' + k + '\')" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:4px 10px;border-radius:8px;font-size:.72rem;cursor:pointer;font-family:Inter,sans-serif;">🗑️</button></td></tr>';
       }).join('');
