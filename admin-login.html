@@ -109,10 +109,10 @@
         const cc=await getCollegeCode(u.uid);
         if(cc){
           localStorage.setItem('ba_college_code',cc);
-          window.location.href='admin.html';
+          window.location.replace('admin.html');
         } else {
           // No college code yet — send to CC setup screen
-          window.location.href='college-code.html';
+          window.location.replace('college-code.html');
         }
       }
     }
@@ -160,9 +160,9 @@
       const cc=await getCollegeCode(u.uid);
       if(cc){
         localStorage.setItem('ba_college_code',cc);
-        window.location.href='admin.html';
+        window.location.replace('admin.html');
       } else {
-        window.location.href='college-code.html';
+        window.location.replace('college-code.html');
       }
     }catch(e){
       hideLoad();
@@ -189,7 +189,7 @@
         await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
         
         localStorage.setItem('ba_cached_role',ROLE);
-        window.location.href='college-code.html';
+        window.location.replace('college-code.html');
       } else {
         const res=await auth.signInWithEmailAndPassword(email,pass);
         const storedRole=await getRole(res.user.uid);
@@ -203,10 +203,10 @@
         const cc=await getCollegeCode(res.user.uid);
         if(cc){
           localStorage.setItem('ba_college_code',cc);
-          window.location.href='admin.html';
+          window.location.replace('admin.html');
         } else {
           // Logged in but no CC yet — go to CC setup screen
-          window.location.href='college-code.html';
+          window.location.replace('college-code.html');
         }
       }
     }catch(e){

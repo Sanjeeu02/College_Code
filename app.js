@@ -2678,17 +2678,17 @@ function handleAuthSuccess(user) {
     localStorage.setItem('ba_cached_role', 'admin');
     // If admin has no CC yet, go to college-code screen to create one
     if (!S.collegeCode) {
-      window.location.href = 'college-code.html';
+      window.location.replace('college-code.html');
       return;
     }
-    window.location.href = 'admin.html';
+    window.location.replace('admin.html');
     return;
   }
 
   // ── Students / Drivers: require a college code before accessing the app ──
   if (!S.collegeCode) {
     // No college code yet — must go through the CC setup screen
-    window.location.href = 'college-code.html';
+    window.location.replace('college-code.html');
     return;
   }
 
@@ -2703,6 +2703,9 @@ function handleAuthSuccess(user) {
   updateUIByRole();
   renderProfileInfo();
   showToast(`👋 Welcome back, ${user.displayName || 'User'}!`);
+  
+  // Initialize back button trap for dashboard
+  setupBackButtonTrap();
 }
 
 
@@ -2731,7 +2734,7 @@ function handleLogout() {
   localStorage.removeItem('ba_college_code');
   S.auth.signOut();
   closeProfile();
-  location.reload();
+  window.location.replace('index.html');
 }
 
 function switchRole() {
@@ -2743,7 +2746,58 @@ function switchRole() {
   S.collegeCode = null;
   S.auth.signOut();
   closeProfile();
-  location.reload();
+  window.location.replace('index.html');
+}
+
+// ─── BACK BUTTON / NAVIGATION TRAP ───────────────────────────────
+function setupBackButtonTrap() {
+  // Push a dummy state so the first back action triggers popstate
+  window.history.pushState({ dashboard: true }, '', window.location.href);
+
+  window.addEventListener('popstate', function (event) {
+    // Immediately push state again to prevent actually going back
+    window.history.pushState({ dashboard: true }, '', window.location.href);
+
+    // Browsers block confirm() inside popstate. Use a custom overlay instead.
+    let overlay = document.getElementById('exit-confirm-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'exit-confirm-overlay';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+      overlay.innerHTML = `
+        <div style="background:#1a1d2e;padding:24px;border-radius:20px;width:85%;max-width:320px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);font-family:Inter,sans-serif;">
+          <div style="font-size:40px;margin-bottom:12px;">🚪</div>
+          <h3 style="color:#fff;margin-bottom:8px;font-size:1.2rem;">Exit App?</h3>
+          <p style="color:#8892b0;font-size:0.9rem;margin-bottom:24px;">Are you sure you want to exit the application?</p>
+          <div style="display:flex;gap:12px;">
+            <button id="exit-btn-no" style="flex:1;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,0.1);color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">No, Stay</button>
+            <button id="exit-btn-yes" style="flex:1;padding:12px;border:none;border-radius:12px;background:#ef4444;color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">Yes, Exit</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      document.getElementById('exit-btn-no').onclick = () => {
+        overlay.style.display = 'none';
+      };
+      
+      document.getElementById('exit-btn-yes').onclick = () => {
+        overlay.style.display = 'none';
+        // Attempt to close mobile app if applicable, else fallback to window.close()
+        if (navigator.app && navigator.app.exitApp) {
+          navigator.app.exitApp();
+        } else if (navigator.device && navigator.device.exitApp) {
+          navigator.device.exitApp();
+        } else {
+          window.close();
+          // If window.close() is blocked by the browser, show a safe exit message
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f1117;color:#e8eaf6;font-family:Inter,sans-serif;text-align:center;padding:20px;"><div><h2 style="margin-bottom:10px;">Exited Successfully</h2><p style="color:#8892b0;">You have securely left the app. You can now close this tab.</p></div></div>';
+        }
+      };
+    } else {
+      overlay.style.display = 'flex';
+    }
+  });
 }
 
 // ─── PULL-TO-REFRESH ─────────────────────────────────────────────

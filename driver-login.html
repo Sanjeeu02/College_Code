@@ -109,10 +109,10 @@
         const cc=await getCollegeCode(u.uid);
         if(cc){
           localStorage.setItem('ba_college_code',cc);
-          window.location.href='index.html';
+          window.location.replace('index.html');
         } else {
           // No CC yet — redirect to college code setup
-          window.location.href='college-code.html';
+          window.location.replace('college-code.html');
         }
       }
     }
@@ -157,9 +157,9 @@
       const existingCc=await getCollegeCode(u.uid);
       if(existingCc){
         localStorage.setItem('ba_college_code',existingCc);
-        window.location.href='index.html';
+        window.location.replace('index.html');
       } else {
-        window.location.href='college-code.html';
+        window.location.replace('college-code.html');
       }
     }catch(e){
       hideLoad();
@@ -184,7 +184,7 @@
         await res.user.updateProfile({displayName:name});
         await fsdb.collection('users').doc(res.user.uid).set({name,email,role:ROLE,createdAt:Date.now()});
         localStorage.setItem('ba_cached_role',ROLE);
-        window.location.href='college-code.html';
+        window.location.replace('college-code.html');
       }catch(e){
         hideLoad();
         showErr('Error: '+e.message);
@@ -204,10 +204,10 @@
         const cc=await getCollegeCode(res.user.uid);
         if(cc){
           localStorage.setItem('ba_college_code',cc);
-          window.location.href='index.html';
+          window.location.replace('index.html');
         } else {
           // Logged in but no CC yet — redirect to CC setup
-          window.location.href='college-code.html';
+          window.location.replace('college-code.html');
         }
       }catch(e){
         hideLoad();
