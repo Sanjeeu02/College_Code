@@ -407,54 +407,66 @@
                             </div>
                         </div>
 
-                        <!-- ✨ AI Smart Insights + Chat -->
-                        <div style="margin-top:10px; display:flex; gap:8px;">
-                            <button class="pill-btn ai-insights-btn" id="btn-ai-insight" onclick="fetchAIInsight()"
-                                style="flex:1; border-radius: 12px; font-weight: 700; padding: 10px;">
-                                ✨ AI Insights
-                            </button>
-                            <button class="pill-btn" id="btn-ai-chat" onclick="openAiChat()"
-                                style="flex:1; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-                                🤖 Ask Assistant
-                            </button>
+                        <!-- ⬇️ Options Toggle ⬇️ -->
+                        <div id="track-options-toggle" onclick="toggleTrackOptions()" style="display:flex; justify-content:center; align-items:center; padding: 10px; cursor:pointer; color:var(--muted); font-size:0.85rem; border-top:1px solid var(--border); margin-top:10px; font-weight: 600;">
+                            <span id="track-options-text">Show More Options</span>
+                            <span id="track-options-arrow" style="margin-left:6px; transition: transform 0.3s; transform: rotate(0deg);">▼</span> 
                         </div>
 
-                        <div id="decision-card" class="hidden"
-                            style="margin-top:10px; padding:12px; border-radius:14px; border:1px solid #f59e0b; background: rgba(245,158,11,0.08);">
-                            <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px;">🧠 AI
-                                Decision Engine</div>
-                            <div id="decision-text" style="font-size:0.85rem; color:var(--text); line-height:1.5;">
-                                Analyzing route options...</div>
-                        </div>
+                        <!-- Collapsible Container -->
+                        <div id="track-options-content" style="display:none; flex-direction:column;">
+                            <!-- ✨ AI Smart Insights + Chat -->
+                            <div style="margin-top:10px; display:flex; gap:8px;">
+                                <button class="pill-btn ai-insights-btn" id="btn-ai-insight" onclick="fetchAIInsight()"
+                                    style="flex:1; border-radius: 12px; font-weight: 700; padding: 10px;">
+                                    ✨ AI Insights
+                                </button>
+                                <button class="pill-btn" id="btn-ai-chat" onclick="openAiChat()"
+                                    style="flex:1; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 12px; font-weight: 700; padding: 10px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
+                                    🤖 Ask Assistant
+                                </button>
+                            </div>
 
-                        <div class="sheet-stop-row">
-                            <button class="pill-btn" id="btn-set-stop" onclick="setStopFromGPS()">
-                                <span class="pill-ico">📍</span> Set My Stop Location
-                            </button>
-                            <div class="coord-tag hidden" id="stop-coord-tag">
-                                <span class="coord-check">✅</span><span id="stop-coord-text"></span>
-                                <button class="edit-loc-btn" onclick="editStopLocation()" title="Change stop">✏️
-                                    Edit</button>
+                            <div id="decision-card" class="hidden"
+                                style="margin-top:10px; padding:12px; border-radius:14px; border:1px solid #f59e0b; background: rgba(245,158,11,0.08);">
+                                <div style="font-size:0.75rem; color:#f59e0b; font-weight:700; margin-bottom:6px;">🧠 AI
+                                    Decision Engine</div>
+                                <div id="decision-text" style="font-size:0.85rem; color:var(--text); line-height:1.5;">
+                                    Analyzing route options...</div>
+                            </div>
+
+                            <div class="sheet-stop-row">
+                                <button class="pill-btn" id="btn-set-stop" onclick="setStopFromGPS()">
+                                    <span class="pill-ico">📍</span> Set My Stop Location
+                                </button>
+                                <div class="coord-tag hidden" id="stop-coord-tag">
+                                    <span class="coord-check">✅</span><span id="stop-coord-text"></span>
+                                    <button class="edit-loc-btn" onclick="editStopLocation()" title="Change stop">✏️
+                                        Edit</button>
+                                </div>
+                            </div>
+
+                            <div class="slider-wrap" style="margin-top:6px">
+                                <span style="font-size:.78rem;color:var(--muted);min-width:100px">Alert radius</span>
+                                <input type="range" id="track-radius" min="0.3" max="3" step="0.1" value="1"
+                                    oninput="updateRadius('track')" />
+                                <span class="slider-val" id="track-radius-val">1.0 km</span>
+                            </div>
+
+                            <div class="toggle-item" style="margin-top:4px">
+                                <span style="font-size:.85rem;color:var(--muted)">Vibration</span>
+                                <label class="tog"><input type="checkbox" id="track-vibe" checked /><span
+                                        class="tog-slider"></span></label>
+                            </div>
+                            <div class="toggle-item" style="margin-bottom: 8px;">
+                                <span style="font-size:.85rem;color:var(--muted)">Sound</span>
+                                <label class="tog"><input type="checkbox" id="track-sound" checked /><span
+                                        class="tog-slider"></span></label>
                             </div>
                         </div>
 
-                        <div class="slider-wrap" style="margin-top:6px">
-                            <span style="font-size:.78rem;color:var(--muted);min-width:100px">Alert radius</span>
-                            <input type="range" id="track-radius" min="0.3" max="3" step="0.1" value="1"
-                                oninput="updateRadius('track')" />
-                            <span class="slider-val" id="track-radius-val">1.0 km</span>
-                        </div>
+                        <!-- End of Collapsible Container -->
 
-                        <div class="toggle-item" style="margin-top:4px">
-                            <span style="font-size:.85rem;color:var(--muted)">Vibration</span>
-                            <label class="tog"><input type="checkbox" id="track-vibe" checked /><span
-                                    class="tog-slider"></span></label>
-                        </div>
-                        <div class="toggle-item">
-                            <span style="font-size:.85rem;color:var(--muted)">Sound</span>
-                            <label class="tog"><input type="checkbox" id="track-sound" checked /><span
-                                    class="tog-slider"></span></label>
-                        </div>
 
                         <div class="map-hint" id="map-status-hint">📡 Waiting for bus GPS signal...</div>
 
@@ -701,7 +713,7 @@
                 ETA.</p>
             <!-- Messages -->
             <div id="chat-messages"
-                style="flex:1; overflow-y:auto; max-height:300px; display:flex; flex-direction:column; gap:8px; padding:4px 0;">
+                style="flex:1; overflow-y:auto; min-height:200px; max-height:45vh; display:flex; flex-direction:column; gap:8px; padding:10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);">
             </div>
             <!-- Input -->
             <div style="display:flex; gap:8px; margin-top:10px;">

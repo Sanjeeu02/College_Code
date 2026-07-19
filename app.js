@@ -512,6 +512,23 @@ function switchTab(tab) {
   }
 }
 
+// ─── TRACK OPTIONS TOGGLE ────────────────────────────────────────
+function toggleTrackOptions() {
+  const content = q('#track-options-content');
+  const arrow = q('#track-options-arrow');
+  const text = q('#track-options-text');
+  
+  if (content.style.display === 'none') {
+    content.style.display = 'flex';
+    arrow.style.transform = 'rotate(180deg)';
+    text.textContent = 'Hide Options';
+  } else {
+    content.style.display = 'none';
+    arrow.style.transform = 'rotate(0deg)';
+    text.textContent = 'Show More Options';
+  }
+}
+
 // ─── BUS CODE ENTRY ──────────────────────────────────────────────
 function onCodeInput() {
   const val = q('#bus-code-input').value.toUpperCase();
