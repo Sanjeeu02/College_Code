@@ -695,7 +695,7 @@
                 Analyzing current route, traffic, and bus schedule...
             </p>
             <div class="modal-actions" style="margin-top: 15px;">
-                <button class="main-btn" onclick="document.getElementById('ai-modal').classList.add('hidden')"
+                <button class="main-btn" onclick="closeAiModal()"
                     style="width: 100%; background: var(--surface); color: var(--text);">Close</button>
             </div>
         </div>
@@ -706,7 +706,7 @@
         <div class="modal-box" style="border-color: #10b981; max-height: 90vh; display:flex; flex-direction:column;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div class="modal-title" style="color: #10b981; margin:0;">🤖 Bus AI Assistant</div>
-                <button onclick="document.getElementById('ai-chat-modal').classList.add('hidden')"
+                <button onclick="closeAiChat()"
                     style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);">✕</button>
             </div>
             <p style="font-size:0.75rem; color:var(--muted); margin: 4px 0 8px;">Ask anything about your bus, route, or

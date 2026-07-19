@@ -674,13 +674,15 @@ function openCodeVerifyModal(busId) {
     </div>`;
   q('#cv-code-input').value = '';
   q('#cv-error').classList.add('hidden');
+  pushInnerPageState('code-verify');
   q('#code-verify-modal').classList.remove('hidden');
   setTimeout(() => q('#cv-code-input').focus(), 300);
 }
 
-function closeCodeVerifyModal() {
+function closeCodeVerifyModal(fromPopState = false) {
   q('#code-verify-modal').classList.add('hidden');
   _pendingBusId = null;
+  if (!fromPopState && !isNavigatingBack) window.history.back();
 }
 
 function verifyAndTrack() {
@@ -710,7 +712,7 @@ function verifyAndTrack() {
 
   // ✅ Code correct!
   q('#cv-error').classList.add('hidden');
-  closeCodeVerifyModal();
+  closeCodeVerifyModal(true); // close modal without popping since showMapView will replace state or push
   _doStartTracking(idToTrack);
 }
 
@@ -1109,6 +1111,8 @@ function showMapView() {
   const codeEntry = q('#code-entry-view');
   const mapView   = q('#map-view');
   const panelFind = q('#panel-find');
+
+  pushInnerPageState('map-view');
 
   // Hide the search/code-entry view
   if (codeEntry) codeEntry.classList.add('hidden');
@@ -1847,13 +1851,15 @@ function onDriverPos(pos) {
 // ─── MISS-STOP ALERT (Student → Driver) ─────────────────────────
 function openMissStopModal() {
   if (!S.trackOn || !S.trackedId) { showToast('⚠️ You need to be tracking a bus first.'); return; }
+  pushInnerPageState('miss-stop');
   q('#miss-stop-name').value = S.myStudentName || '';
   q('#miss-stop-status').textContent = '';
   q('#miss-stop-modal').classList.remove('hidden');
 }
 
-function closeMissStopModal() {
+function closeMissStopModal(fromPopState = false) {
   q('#miss-stop-modal').classList.add('hidden');
+  if (!fromPopState && !isNavigatingBack) window.history.back();
 }
 
 function sendMissStopAlert() {
@@ -2334,6 +2340,7 @@ window.addEventListener('appinstalled', () => {
 async function fetchAIInsight() {
   const aiModal = document.getElementById('ai-modal');
   const aiText = document.getElementById('ai-response-text');
+  pushInnerPageState('ai-modal');
   aiModal.classList.remove('hidden');
   aiText.innerHTML = '✨ Analyzing route ETA and live traffic patterns... <br><br> <span style="color:#8b5cf6">Connecting to AI Service...</span>';
 
@@ -2400,6 +2407,11 @@ async function fetchAIInsight() {
 
     aiText.innerHTML = insightHtml;
   }
+}
+
+function closeAiModal(fromPopState = false) {
+  document.getElementById('ai-modal').classList.add('hidden');
+  if (!fromPopState && !isNavigatingBack) window.history.back();
 }
 // ─── ROLE & AUTH LOGIC ──────────────────────────────────────────
 // ─── UNIFIED ROLE LOOKUP (single 'users' collection) ────────────
@@ -2713,11 +2725,13 @@ function handleAuthSuccess(user) {
 
 // ─── PROFILE LOGIC ──────────────────────────────────────────────
 function openProfile() {
+  pushInnerPageState('profile');
   q('#profile-modal').classList.remove('hidden');
 }
 
-function closeProfile() {
+function closeProfile(fromPopState = false) {
   q('#profile-modal').classList.add('hidden');
+  if (!fromPopState && !isNavigatingBack) window.history.back();
 }
 
 function renderProfileInfo() {
@@ -2750,53 +2764,86 @@ function switchRole() {
 }
 
 // ─── BACK BUTTON / NAVIGATION TRAP ───────────────────────────────
+let isNavigatingBack = false;
+
+function pushInnerPageState(id) {
+  if (!isNavigatingBack) {
+    window.history.pushState({ page: 'inner', id: id }, '', window.location.href);
+  }
+}
+
+function closeAllInnerPages() {
+  if (typeof closeProfile === 'function') closeProfile(true);
+  if (typeof closeCodeVerifyModal === 'function') closeCodeVerifyModal(true);
+  if (typeof closeMissStopModal === 'function') closeMissStopModal(true);
+  if (typeof closeAiChat === 'function') closeAiChat(true);
+  if (typeof closeAiModal === 'function') closeAiModal(true);
+  
+  const mapView = document.getElementById('map-view');
+  if (mapView && !mapView.classList.contains('hidden')) {
+    if (typeof showCodeEntryView === 'function') showCodeEntryView();
+    if (typeof stopTracking === 'function') stopTracking(true);
+  }
+}
+
 function setupBackButtonTrap() {
-  // Push a dummy state so the first back action triggers popstate
-  window.history.pushState({ dashboard: true }, '', window.location.href);
+  // Replace current state with a trap, then push the dashboard state
+  if (!window.history.state || window.history.state.page !== 'dashboard') {
+    window.history.replaceState({ page: 'trap' }, '', window.location.href);
+    window.history.pushState({ page: 'dashboard' }, '', window.location.href);
+  }
 
   window.addEventListener('popstate', function (event) {
-    // Immediately push state again to prevent actually going back
-    window.history.pushState({ dashboard: true }, '', window.location.href);
+    isNavigatingBack = true;
+    const state = event.state || {};
 
-    // Browsers block confirm() inside popstate. Use a custom overlay instead.
-    let overlay = document.getElementById('exit-confirm-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'exit-confirm-overlay';
-      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
-      overlay.innerHTML = `
-        <div style="background:#1a1d2e;padding:24px;border-radius:20px;width:85%;max-width:320px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);font-family:Inter,sans-serif;">
-          <div style="font-size:40px;margin-bottom:12px;">🚪</div>
-          <h3 style="color:#fff;margin-bottom:8px;font-size:1.2rem;">Exit App?</h3>
-          <p style="color:#8892b0;font-size:0.9rem;margin-bottom:24px;">Are you sure you want to exit the application?</p>
-          <div style="display:flex;gap:12px;">
-            <button id="exit-btn-no" style="flex:1;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,0.1);color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">No, Stay</button>
-            <button id="exit-btn-yes" style="flex:1;padding:12px;border:none;border-radius:12px;background:#ef4444;color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">Yes, Exit</button>
+    if (state.page === 'trap') {
+      // Re-push dashboard to prevent actually going back in browser history
+      window.history.pushState({ page: 'dashboard' }, '', window.location.href);
+
+      // Show Exit Confirmation
+      let overlay = document.getElementById('exit-confirm-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'exit-confirm-overlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+        overlay.innerHTML = `
+          <div style="background:#1a1d2e;padding:24px;border-radius:20px;width:85%;max-width:320px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.08);font-family:Inter,sans-serif;">
+            <div style="font-size:40px;margin-bottom:12px;">🚪</div>
+            <h3 style="color:#fff;margin-bottom:8px;font-size:1.2rem;">Exit App?</h3>
+            <p style="color:#8892b0;font-size:0.9rem;margin-bottom:24px;">Are you sure you want to exit the application?</p>
+            <div style="display:flex;gap:12px;">
+              <button id="exit-btn-no" style="flex:1;padding:12px;border:none;border-radius:12px;background:rgba(255,255,255,0.1);color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">No, Stay</button>
+              <button id="exit-btn-yes" style="flex:1;padding:12px;border:none;border-radius:12px;background:#ef4444;color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;">Yes, Exit</button>
+            </div>
           </div>
-        </div>
-      `;
-      document.body.appendChild(overlay);
+        `;
+        document.body.appendChild(overlay);
 
-      document.getElementById('exit-btn-no').onclick = () => {
-        overlay.style.display = 'none';
-      };
-      
-      document.getElementById('exit-btn-yes').onclick = () => {
-        overlay.style.display = 'none';
-        // Attempt to close mobile app if applicable, else fallback to window.close()
-        if (navigator.app && navigator.app.exitApp) {
-          navigator.app.exitApp();
-        } else if (navigator.device && navigator.device.exitApp) {
-          navigator.device.exitApp();
-        } else {
-          window.close();
-          // If window.close() is blocked by the browser, show a safe exit message
-          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f1117;color:#e8eaf6;font-family:Inter,sans-serif;text-align:center;padding:20px;"><div><h2 style="margin-bottom:10px;">Exited Successfully</h2><p style="color:#8892b0;">You have securely left the app. You can now close this tab.</p></div></div>';
-        }
-      };
-    } else {
-      overlay.style.display = 'flex';
+        document.getElementById('exit-btn-no').onclick = () => {
+          overlay.style.display = 'none';
+        };
+        
+        document.getElementById('exit-btn-yes').onclick = () => {
+          overlay.style.display = 'none';
+          if (navigator.app && navigator.app.exitApp) {
+            navigator.app.exitApp();
+          } else if (navigator.device && navigator.device.exitApp) {
+            navigator.device.exitApp();
+          } else {
+            window.close();
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f1117;color:#e8eaf6;font-family:Inter,sans-serif;text-align:center;padding:20px;"><div><h2 style="margin-bottom:10px;">Exited Successfully</h2><p style="color:#8892b0;">You have securely left the app. You can now close this tab.</p></div></div>';
+          }
+        };
+      } else {
+        overlay.style.display = 'flex';
+      }
+    } else if (state.page === 'dashboard') {
+      // We are back at dashboard, close any inner pages
+      closeAllInnerPages();
     }
+    
+    setTimeout(() => { isNavigatingBack = false; }, 50);
   });
 }
 

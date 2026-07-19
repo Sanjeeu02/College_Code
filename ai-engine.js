@@ -343,6 +343,7 @@ Answer questions using this data. If asked "should I leave now?", use the walk-t
 
 // ─── 5. GLOBAL HELPERS (called from HTML) ────────────────────────
 function openAiChat() {
+    if (typeof pushInnerPageState === 'function') pushInnerPageState('ai-chat');
     document.getElementById('ai-chat-modal').classList.remove('hidden');
     const box = document.getElementById('chat-messages');
     if (box && box.children.length === 0) {
@@ -354,6 +355,11 @@ function openAiChat() {
         Ask me about your bus ETA, delays, crowd, or whether to leave now!
       </div>`;
     }
+}
+
+function closeAiChat(fromPopState = false) {
+    document.getElementById('ai-chat-modal').classList.add('hidden');
+    if (!fromPopState && typeof isNavigatingBack !== 'undefined' && !isNavigatingBack) window.history.back();
 }
 
 function sendChatMessage() {
