@@ -765,10 +765,20 @@ function _doStartTracking(busId) {
       console.log('🎯 Double RAF trigger for initMap');
       initMap();
 
-      // Immediately place bus marker if location exists
+      // ── BUG FIX #5: Only place the initial marker if the cached location
+      // is FRESH. S.allBuses is populated by the parent /buses listener which
+      // may hold the last persisted location from a previous driver session.
+      // Placing that stale position on the map before the /location listener
+      // starts causes the "old location flash" that students see at tracking start.
       if (bus.location && bus.location.lat && bus.location.lon) {
-        moveBusOnMap(bus.location.lat, bus.location.lon);
-        updateTrackInfo(bus.location);
+        const initAge = bus.location.timestamp ? (Date.now() - bus.location.timestamp) : Infinity;
+        if (initAge < GPS_STALE_THRESHOLD_MS) {
+          console.log(`[BusAlert Student] 🗺️ Placing initial marker from allBuses cache (age: ${Math.round(initAge / 1000)}s).`);
+          moveBusOnMap(bus.location.lat, bus.location.lon);
+          updateTrackInfo(bus.location);
+        } else {
+          console.warn(`[BusAlert Student] 🚫 Skipping stale initial marker from allBuses (age: ${Math.round(initAge / 1000)}s). Waiting for live listener.`);
+        }
       }
       if (S.stopLoc) drawStopMarker(S.stopLoc.lat, S.stopLoc.lon);
 
@@ -803,7 +813,27 @@ function startBusPoller(busId) {
     // overwrote the 🔴 OFFLINE state set by _handleBusUpdate every time the
     // location node was null (driver ended trip / node deleted).
     if (loc && loc.lat && loc.lon) {
-      // Valid location received — update map and restore live indicator
+
+      // ── BUG FIX #3: Timestamp staleness guard ───────────────────────
+      // If the received location timestamp is older than GPS_STALE_THRESHOLD_MS
+      // (30 seconds), it means the driver stopped sending updates (GPS lost,
+      // app killed, connectivity dropped). Do NOT update the map with stale
+      // data. Instead, show a clear offline state so students aren't misled.
+      const locAge = loc.timestamp ? (Date.now() - loc.timestamp) : Infinity;
+      if (locAge > GPS_STALE_THRESHOLD_MS) {
+        console.warn(`[BusAlert Student] ⚠️ Received stale location (age: ${Math.round(locAge / 1000)}s) — NOT updating map marker. Showing offline state.`);
+        // Only apply offline badge if not already offline
+        if (S.trackedBusActive !== false) {
+          const hint = q('#map-status-hint');
+          if (hint) { hint.textContent = '⚠️ GPS Signal Lost — Driver may be offline'; hint.style.color = '#f59e0b'; }
+        }
+        return; // ← CRITICAL: do not render stale position
+      }
+
+      // Debug log — confirms student is receiving fresh updates from Firebase
+      console.log(`[BusAlert Student] 📍 Live update received → lat:${loc.lat.toFixed(5)}, lon:${loc.lon.toFixed(5)}, age:${Math.round(locAge / 1000)}s`);
+
+      // Valid, fresh location received — update map and restore live indicator
       if (S.allBuses[busId]) S.allBuses[busId].location = loc;
       moveBusOnMap(loc.lat, loc.lon);
       updateTrackInfo(loc);
@@ -814,15 +844,17 @@ function startBusPoller(busId) {
         _applyOnlineBadge('📡 Live Tracking');
       }
 
-      // Reset the stale-signal timer
+      // Reset the stale-signal timer — if no update arrives in 30s,
+      // warn the student that GPS signal may be lost.
       if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
       _studentGpsTimeout = setTimeout(() => {
-        // Only show stale warning if still online (not already offline)
+        // Only show stale warning if still online (not already marked offline)
         if (S.trackOn && S.trackedBusActive !== false) {
           const hint = q('#map-status-hint');
-          if (hint) { hint.textContent = '⚠️ GPS Signal Lost - Showing Last Known Location'; hint.style.color = '#f59e0b'; }
+          if (hint) { hint.textContent = '⚠️ GPS Signal Lost — Showing Last Known Location'; hint.style.color = '#f59e0b'; }
+          console.warn('[BusAlert Student] ⏰ No location update for 30s — GPS signal may be lost.');
         }
-      }, 15000);
+      }, GPS_STALE_THRESHOLD_MS);
     }
     // If loc is null: driver deleted / cleared location. Do nothing here —
     // _handleBusUpdate on the parent listener owns the offline badge transition.
@@ -1771,14 +1803,44 @@ function stopDriver() {
 let _lastMoved, _lastLat, _lastLon;
 let _lastPushTime = 0;                    // GPS write throttle timestamp
 const GPS_PUSH_INTERVAL_MS = 5000;        // push to Firebase at most every 5 seconds
-let _offlineGpsQueue = JSON.parse(localStorage.getItem('ba_offline_gps') || '[]');
+
+// ── BUG FIX #2: Always start with a clean slate.
+// Loading the queue from localStorage at module init created a race where the
+// 'online' event could fire before startDriver() cleared it, causing stale
+// coordinates from a previous session to be pushed to Firebase.
+let _offlineGpsQueue = [];
+localStorage.setItem('ba_offline_gps', '[]');
+
+// ── Staleness threshold for GPS data ──────────────────────────────
+// If a cached or received location is older than this, it is discarded.
+const GPS_STALE_THRESHOLD_MS = 30000; // 30 seconds
 
 // Auto-sync offline cache when connection restores
 window.addEventListener('online', () => {
+  // ── BUG FIX #4: Reset the GPS throttle on reconnect so the first live
+  // watchPosition fix is pushed to Firebase immediately, not blocked by
+  // the 5-second throttle that was ticking during the offline period.
+  _lastPushTime = 0;
+  console.log('[BusAlert Driver] 🌐 Back online — GPS throttle reset, ready for fresh push.');
+
   if (_offlineGpsQueue.length > 0 && S.driverOn && S.driverBusId) {
-    showToast(`🔄 Syncing offline GPS data...`);
+    // ── BUG FIX #1: Only push cached GPS data if it is FRESH (< 30 seconds old).
+    // Previously, stale data from minutes (or sessions) ago was blindly pushed,
+    // overwriting the driver's current live location on the student's map.
     const lastPoint = _offlineGpsQueue[_offlineGpsQueue.length - 1];
-    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(lastPoint);
+    const cachedTimestamp = lastPoint['location/timestamp'];
+    const ageMs = Date.now() - (cachedTimestamp || 0);
+
+    if (cachedTimestamp && ageMs < GPS_STALE_THRESHOLD_MS) {
+      showToast('🔄 Syncing recent offline GPS data...');
+      console.log(`[BusAlert Driver] Pushing cached GPS fix (age: ${Math.round(ageMs / 1000)}s) to Firebase.`);
+      S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(lastPoint);
+    } else {
+      // Cached data is too old — discard it silently. The active watchPosition
+      // will send a fresh fix within a few seconds on its own.
+      console.warn(`[BusAlert Driver] ⚠️ Discarding stale offline GPS cache (age: ${Math.round(ageMs / 1000)}s > ${GPS_STALE_THRESHOLD_MS / 1000}s threshold). Waiting for fresh watchPosition fix.`);
+    }
+
     _offlineGpsQueue = [];
     localStorage.setItem('ba_offline_gps', '[]');
   }
@@ -1832,19 +1894,25 @@ function onDriverPos(pos) {
     'location/timestamp': now
   };
 
+  // Debug log — confirms GPS is still actively pushing to Firebase
+  console.log(`[BusAlert Driver] 📡 Pushing location → lat:${lat.toFixed(5)}, lon:${lon.toFixed(5)}, acc:${Math.round(accuracy)}m, ts:${new Date(now).toLocaleTimeString()}`);
+
   if (navigator.onLine) {
-    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(payload).catch(e => {
-      // Offline fallback if Firebase fails
-      _offlineGpsQueue.push(payload);
-      if (_offlineGpsQueue.length > 50) _offlineGpsQueue.shift();
-      localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
-    });
+    S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(payload)
+      .then(() => console.log('[BusAlert Driver] ✅ Firebase write successful.'))
+      .catch(e => {
+        console.warn('[BusAlert Driver] Firebase write failed — caching locally:', e.message);
+        // Cache only the LATEST point — older entries are irrelevant
+        // because we only ever replay the last point on reconnect.
+        _offlineGpsQueue = [payload];
+        localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
+      });
   } else {
-    // True offline caching
-    _offlineGpsQueue.push(payload);
-    if (_offlineGpsQueue.length > 50) _offlineGpsQueue.shift();
+    // True offline caching — keep only the most recent fix
+    _offlineGpsQueue = [payload];
     localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
     showToast('⚠️ Offline - Caching GPS...');
+    console.warn(`[BusAlert Driver] 📴 Offline — GPS cached locally at ${new Date(now).toLocaleTimeString()}`);
   }
 }
 
