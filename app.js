@@ -23,6 +23,16 @@ const S = {
   driverOn: false, driverWid: null, driverBusId: null, driverUpdates: 0,
   savedBuses: [], driverAccessCode: null,
 
+  // ── SECURITY: Active-driver session lock ──────────────────────
+  // driverSessionId: a fresh UUID generated each time startDriver() is called.
+  // It is written to Firebase activeDriver/sessionId so every device can
+  // verify whether IT is still the authorised GPS source before pushing.
+  // _isActiveDriver: set/cleared by a continuous Firebase listener; checked
+  // synchronously in onDriverPos() before every write.
+  driverSessionId: null,
+  _isActiveDriver: false,
+  _activeDriverListenerRef: null,   // Firebase ref so we can turn it off
+
   // GPS watchPosition health
   geoWatchRetries: 0, geoWatchTimer: null,
 
@@ -235,27 +245,23 @@ function loadLocal() {
   const sr = lsGet('ba_sr'); if (sr) { q('#sleep-radius').value = sr; updateRadius('sleep'); }
   const tr = lsGet('ba_tr'); if (tr) { q('#track-radius').value = tr; updateRadius('track'); }
 
-  // Restore driver session — only if it was started within the last 4 hours.
-  // ── PRIMARY FIX for the "location switches to developer device" bug ──
-  // Without this check, a stale ba_driver_session from earlier testing sets
-  // S.driverOn=true on the developer's device, starts the GPS heartbeat, and
-  // pushes the developer's coordinates to Firebase, overwriting the real
-  // driver's location on the student's map.
-  const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+  // ══════════════════════════════════════════════════════════════
+  // SECURITY FIX: NEVER auto-resume a driver session from localStorage.
+  //
+  // Root cause of the wrong-location bug:
+  //   A stale ba_driver_session (from a developer/tester device) caused
+  //   startDriver() to run automatically on every page load, pushing that
+  //   device's GPS coordinates to Firebase and overwriting the real driver.
+  //
+  // Solution: Always clear any stored session on load. The driver MUST
+  // manually enter their bus code and tap "Go Live" every trip.
+  // The Firebase activeDriver lock (written in startDriver) then ensures
+  // only one authenticated device can push location at a time.
+  // ══════════════════════════════════════════════════════════════
   const ds = ls('ba_driver_session');
-  const sessionIsValid = ds && ds.active && ds.startedAt &&
-    (Date.now() - ds.startedAt < SESSION_MAX_AGE_MS);
-  if (sessionIsValid) {
-    _driverProfile = ds.profile;
-    S.driverBusId = ds.busId;
-    S.driverAccessCode = ds.accessCode;
-    S.driverOn = true;
-    startDriver(true); // true means resuming
-  } else if (ds && ds.active) {
-    // Session exists but is stale or has no startedAt timestamp — clear it
-    // so it cannot auto-resume and pollute Firebase with developer-device GPS.
+  if (ds && ds.active) {
     lsSave('ba_driver_session', { active: false });
-    console.warn('🕐 Stale driver session cleared — not auto-resuming.');
+    console.warn('🔒 [BusAlert Security] Driver session cleared on load — manual re-login required. Auto-resume is disabled to prevent GPS spoofing from stale sessions.');
   }
 }
 
@@ -765,21 +771,18 @@ function _doStartTracking(busId) {
       console.log('🎯 Double RAF trigger for initMap');
       initMap();
 
-      // ── BUG FIX #5: Only place the initial marker if the cached location
-      // is FRESH. S.allBuses is populated by the parent /buses listener which
-      // may hold the last persisted location from a previous driver session.
-      // Placing that stale position on the map before the /location listener
-      // starts causes the "old location flash" that students see at tracking start.
-      if (bus.location && bus.location.lat && bus.location.lon) {
-        const initAge = bus.location.timestamp ? (Date.now() - bus.location.timestamp) : Infinity;
-        if (initAge < GPS_STALE_THRESHOLD_MS) {
-          console.log(`[BusAlert Student] 🗺️ Placing initial marker from allBuses cache (age: ${Math.round(initAge / 1000)}s).`);
-          moveBusOnMap(bus.location.lat, bus.location.lon);
-          updateTrackInfo(bus.location);
-        } else {
-          console.warn(`[BusAlert Student] 🚫 Skipping stale initial marker from allBuses (age: ${Math.round(initAge / 1000)}s). Waiting for live listener.`);
-        }
-      }
+      // ══════════════════════════════════════════════════════════
+      // SECURITY FIX: Never place an initial bus marker from the
+      // cached S.allBuses data. The /buses node in Firebase may hold
+      // the last persisted location from a PREVIOUS driver session —
+      // placing it on the map causes students to see a wrong location
+      // flash the moment they start tracking, before the live listener
+      // delivers the first real GPS fix.
+      //
+      // Instead, the map stays empty until startBusPoller() receives
+      // a verified fresh location (age < GPS_STALE_THRESHOLD_MS).
+      // ══════════════════════════════════════════════════════════
+      console.log('[BusAlert Student] ⏳ Waiting for live GPS update from driver — no cached marker placed.');
       if (S.stopLoc) drawStopMarker(S.stopLoc.lat, S.stopLoc.lon);
 
       // Start high-frequency polling as backup for the Firebase listener
@@ -1558,21 +1561,66 @@ function startDriver(resuming = false) {
 
   S.driverAccessCode = accessCode;
 
-  // ── DEDUP FIX: Use the admin-created stable Firebase key as driverBusId.
+  // ── Use the admin-created stable Firebase key as driverBusId.
   // profileId IS the Firebase key that admin used (e.g. "bus-101").
   // This ensures every GPS update goes to the SAME node admin created,
   // instead of creating a new bus_NUM_TIMESTAMP entry on every session.
-  if (!resuming) {
-    S.driverBusId = profileId; // ← stable key, NOT 'bus_' + num + '_' + Date.now()
-  }
+  S.driverBusId = profileId; // Always use profileId — no resuming
 
   S.driverUpdates = 0;
 
-  // ── BUG FIX: Clear offline GPS queue from any PREVIOUS trip.
-  // Without this, coming back online after a trip would re-push stale
-  // coordinates from the last session, snapping the marker to old location.
+  // ── Clear offline GPS queue from any previous trip.
   _offlineGpsQueue = [];
   localStorage.setItem('ba_offline_gps', '[]');
+
+  // ══════════════════════════════════════════════════════════════
+  // SECURITY: Generate a fresh session ID and claim the activeDriver
+  // node in Firebase. This is the single source of truth that decides
+  // which device is allowed to push GPS coordinates for this bus.
+  // ══════════════════════════════════════════════════════════════
+  const sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  S.driverSessionId = sessionId;
+  S._isActiveDriver = false; // will be set to true by the listener below
+
+  const activeDriverRef = S.db.ref(`colleges/${S.collegeCode}/activeDriver`);
+
+  // Write the claim to Firebase
+  activeDriverRef.set({
+    sessionId,
+    busId: S.driverBusId,
+    deviceUA: (navigator.userAgent || '').slice(0, 100),
+    startedAt: Date.now()
+  }).then(() => {
+    console.log('[BusAlert Security] ✅ activeDriver claim written — sessionId:', sessionId);
+  }).catch(e => console.error('[BusAlert Security] Failed to write activeDriver:', e.message));
+
+  // On disconnect: clear the activeDriver node so no stale lock remains
+  activeDriverRef.onDisconnect().remove();
+
+  // ── Continuous listener: watch activeDriver/sessionId in real time.
+  // If another device overwrites the node (or it is cleared), this device
+  // immediately stops pushing GPS. This is the enforcement mechanism.
+  if (S._activeDriverListenerRef) {
+    S._activeDriverListenerRef.off('value');
+  }
+  S._activeDriverListenerRef = activeDriverRef;
+  activeDriverRef.on('value', snap => {
+    const data = snap.val();
+    if (!data || data.sessionId !== S.driverSessionId) {
+      if (S.driverOn) {
+        // Our session was revoked — stop immediately
+        S._isActiveDriver = false;
+        console.error('[BusAlert Security] 🚫 activeDriver session mismatch — another device has taken over. Stopping GPS.');
+        showToast('⚠️ Another device claimed this bus. Your location sharing has stopped.');
+        stopDriver();
+      }
+    } else {
+      // Confirmed: this device is the authorised GPS source
+      S._isActiveDriver = true;
+    }
+  });
 
   S.driverOn = true;
   BackgroundKeepAlive.start();
@@ -1585,18 +1633,15 @@ function startDriver(resuming = false) {
   q('#driver-btn-label').innerHTML = '🔴 &nbsp;Stop Sharing';
   setStatus('Driver Live 🟢', true);
 
-  // Save session — include startedAt so loadLocal() can detect stale sessions
-  // and refuse to auto-resume a session left over from a previous testing day.
+  // Save session to localStorage (for beforeunload cleanup ONLY — not for auto-resume)
   lsSave('ba_driver_session', {
     active: true,
-    profile: _driverProfile,
     busId: S.driverBusId,
     accessCode: S.driverAccessCode,
     startedAt: Date.now()
   });
 
-  if (!resuming) showToast(`🟢 LIVE: Bus ${num} | Student Code: ${accessCode}`);
-  else showToast(`🔄 Resumed: Bus ${num}`);
+  showToast(`🟢 LIVE: Bus ${num} | Student Code: ${accessCode}`);
 
   // On disconnect: mark bus as inactive (do NOT delete — preserves admin's record)
   S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().update({
@@ -1747,7 +1792,19 @@ function pushSimulatedLocation(mph) {
   const currentLat = p1[0] + (p2[0] - p1[0]) * SIMULATION.progress;
   const currentLon = p1[1] + (p2[1] - p1[1]) * SIMULATION.progress;
 
-  // Hand off mock properties directly to the main system
+  // ══════════════════════════════════════════════════════════════
+  // SECURITY GUARD: Block simulation from writing fake coordinates
+  // to Firebase unless this device is confirmed as activeDriver AND
+  // the user has explicitly enabled simulation. This prevents a
+  // developer running simulation on their device from corrupting
+  // the live student map with fake test route coordinates.
+  // ══════════════════════════════════════════════════════════════
+  if (!S._isActiveDriver) {
+    console.warn('[BusAlert Security] Simulation GPS push blocked — not the activeDriver.');
+    return;
+  }
+
+  // Hand off mock coordinates to the main GPS handler
   onDriverPos({
     coords: {
       latitude: currentLat,
@@ -1761,6 +1818,7 @@ function pushSimulatedLocation(mph) {
 
 function stopDriver() {
   S.driverOn = false;
+  S._isActiveDriver = false;
   BackgroundKeepAlive.stop();
   stopAiSimulationLoop();
   _stopDriverHeartbeat(); // stop background GPS heartbeat
@@ -1768,10 +1826,28 @@ function stopDriver() {
   clearTimeout(S.geoWatchTimer);
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
 
+  // ── SECURITY: Stop listening to and release the activeDriver claim ──
+  // Detach the listener first so it doesn't re-trigger stopDriver() recursively.
+  if (S._activeDriverListenerRef) {
+    S._activeDriverListenerRef.off('value');
+    S._activeDriverListenerRef = null;
+  }
+  // Release the activeDriver node in Firebase so the next device can claim it.
+  if (S.db && S.collegeCode && S.driverSessionId) {
+    // Only remove if WE are still the owner (prevents removing a new session)
+    S.db.ref(`colleges/${S.collegeCode}/activeDriver`).once('value').then(snap => {
+      const data = snap.val();
+      if (data && data.sessionId === S.driverSessionId) {
+        S.db.ref(`colleges/${S.collegeCode}/activeDriver`).remove();
+        console.log('[BusAlert Security] activeDriver node released.');
+      }
+    });
+  }
+  S.driverSessionId = null;
+
   if (S.db && S.driverBusId) {
     S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).onDisconnect().cancel();
-    // ── DEDUP FIX: Mark bus INACTIVE instead of deleting it.
-    // Deleting the node left the admin's static entry as a ghost "offline" card.
+    // Mark bus INACTIVE instead of deleting it.
     // Updating active:false + clearing location preserves the fleet record while
     // correctly showing the bus as offline on the student & admin views.
     S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update({
@@ -1781,7 +1857,7 @@ function stopDriver() {
     });
   }
 
-  // Clear session
+  // Clear session so it cannot be auto-resumed on next load
   lsSave('ba_driver_session', { active: false });
 
   q('#driver-login-view').classList.remove('hidden');
@@ -1804,12 +1880,15 @@ let _lastMoved, _lastLat, _lastLon;
 let _lastPushTime = 0;                    // GPS write throttle timestamp
 const GPS_PUSH_INTERVAL_MS = 5000;        // push to Firebase at most every 5 seconds
 
-// ── BUG FIX #2: Always start with a clean slate.
-// Loading the queue from localStorage at module init created a race where the
-// 'online' event could fire before startDriver() cleared it, causing stale
-// coordinates from a previous session to be pushed to Firebase.
+// ── SECURITY FIX: Always start with a completely clean offline GPS queue.
+// Loading stale GPS fixes from a previous session via localStorage caused
+// those coordinates to be re-pushed to Firebase on reconnect, snapping
+// the student's map marker to an old location.
+// We clear both the in-memory queue AND localStorage immediately at module
+// load — before any 'online' event can fire and replay stale data.
 let _offlineGpsQueue = [];
 localStorage.setItem('ba_offline_gps', '[]');
+console.log('[BusAlert Security] Offline GPS cache cleared at startup.');
 
 // ── Staleness threshold for GPS data ──────────────────────────────
 // If a cached or received location is older than this, it is discarded.
@@ -1852,12 +1931,27 @@ const GPS_ACCURACY_THRESHOLD = 100;
 
 function onDriverPos(pos) {
   if (!S.driverOn) return;
+
+  // ══════════════════════════════════════════════════════════════
+  // SECURITY GUARD: Verify this device is still the authorised GPS
+  // source before writing anything to Firebase.
+  //
+  // S._isActiveDriver is maintained by a continuous Firebase listener
+  // on the activeDriver node (set up in startDriver). If another device
+  // has claimed the session (or the node was cleared), this flag is
+  // false and we refuse to push — preventing location override.
+  // ══════════════════════════════════════════════════════════════
+  if (!S._isActiveDriver) {
+    console.warn('[BusAlert Security] ⛔ GPS push blocked — this device is not the activeDriver. Waiting for Firebase confirmation...');
+    return;
+  }
+
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
   
-  // ── BUG FIX 1: Validate coordinates (null / 0,0 island guard) ──
+  // Validate coordinates (null / 0,0 island guard)
   if (!lat || !lon || (lat === 0 && lon === 0)) return;
 
-  // ── BUG FIX 2: Accuracy filter — skip low-quality first GPS fixes ──
+  // Accuracy filter — skip low-quality first GPS fixes
   if (accuracy > GPS_ACCURACY_THRESHOLD) {
     console.warn(`⚠️ GPS fix rejected (accuracy ${Math.round(accuracy)}m > ${GPS_ACCURACY_THRESHOLD}m threshold). Waiting for better signal.`);
     q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ⚠️';
@@ -1880,9 +1974,7 @@ function onDriverPos(pos) {
   q('#dlc-time').textContent = new Date().toLocaleTimeString();
   q('#dlc-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
-  // ── GPS THROTTLE: Write to Firebase at most once every 5 seconds ──
-  // GPS events can fire every 1-2 seconds; pushing every tick wastes bandwidth
-  // and can cause duplicate/out-of-order updates in the Realtime Database.
+  // GPS THROTTLE: Write to Firebase at most once every 5 seconds
   if (now - _lastPushTime < GPS_PUSH_INTERVAL_MS) return;
   _lastPushTime = now;
   
@@ -1894,7 +1986,6 @@ function onDriverPos(pos) {
     'location/timestamp': now
   };
 
-  // Debug log — confirms GPS is still actively pushing to Firebase
   console.log(`[BusAlert Driver] 📡 Pushing location → lat:${lat.toFixed(5)}, lon:${lon.toFixed(5)}, acc:${Math.round(accuracy)}m, ts:${new Date(now).toLocaleTimeString()}`);
 
   if (navigator.onLine) {
@@ -1903,7 +1994,6 @@ function onDriverPos(pos) {
       .catch(e => {
         console.warn('[BusAlert Driver] Firebase write failed — caching locally:', e.message);
         // Cache only the LATEST point — older entries are irrelevant
-        // because we only ever replay the last point on reconnect.
         _offlineGpsQueue = [payload];
         localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
       });
@@ -2378,19 +2468,18 @@ window.addEventListener('offline', () => {
   // No need to stop the watchPosition — let it keep recording to the offline queue
 });
 
-// ─── FIX: Clear driver session on page unload ────────────────────
-// When a developer refreshes the page while in driver mode, stopDriver() is
-// never called, so ba_driver_session stays active:true in localStorage. On the
-// next load, loadLocal() sees active:true and auto-resumes GPS sharing —
-// pushing the developer's location to Firebase and overwriting the real driver.
-// This beforeunload clears the session flag synchronously before unload completes.
+// ─── SECURITY: Clear driver session + activeDriver lock on page unload ────
+// When the tab is refreshed or closed while in driver mode, stopDriver() is
+// never called. This beforeunload handler does a synchronous cleanup:
+//   1. Clears ba_driver_session so the next load cannot auto-resume.
+//   2. The Firebase onDisconnect() rules (set in startDriver) will remove
+//      the activeDriver node and mark the bus inactive automatically.
 window.addEventListener('beforeunload', () => {
   if (S.driverOn) {
     lsSave('ba_driver_session', { active: false });
-    // Best-effort: mark bus inactive so the onDisconnect() handler is not
-    // the only safety net. (Synchronous XHR on unload is unreliable, so
-    // we rely on the existing onDisconnect rule set in startDriver().)
-    console.log('🔌 Page unloading with driver active — session cleared.');
+    // The Firebase onDisconnect() callbacks registered in startDriver() will
+    // handle the server-side cleanup (removing activeDriver, setting active:false).
+    console.log('[BusAlert Security] 🔌 Page unloading — session cleared. Firebase onDisconnect() will release activeDriver lock.');
   }
 });
 

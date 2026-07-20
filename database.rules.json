@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "colleges": {
+      "$collegeCode": {
+        "activeDriver": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        },
+        "buses": {
+          ".read": "auth != null",
+          "$busId": {
+            ".write": "auth != null",
+            "location": {
+              ".write": "auth != null && root.child('colleges').child($collegeCode).child('activeDriver').child('busId').val() === $busId"
+            }
+          }
+        },
+        "student_alerts": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}
