@@ -52,6 +52,31 @@ const S = {
   authInProgress: false, // prevents onAuthStateChanged from racing popup/redirect flow
 };
 
+// ─── DEBUG & DIAGNOSTICS SINGLETON ────────────────────────────────
+// BusAlertDebug provides structured, categorised logging for GPS, Firebase,
+// and security events. Use BusAlertDebug.dumpLog() in DevTools to inspect.
+const BusAlertDebug = {
+  _logs: [],
+  _maxLogs: 500,
+
+  log(category, message) {
+    const entry = { ts: new Date().toLocaleTimeString(), category, message };
+    this._logs.push(entry);
+    if (this._logs.length > this._maxLogs) this._logs.shift();
+    const icons = { 'DRIVER-GPS': '📡', 'FIREBASE-WRITE': '📤', 'STUDENT-READ': '📥', 'SECURITY': '🔒', 'BACKGROUND': '⚙️' };
+    console.log(`[BusAlert ${icons[category] || '📋'} ${category}] ${entry.ts} — ${message}`);
+  },
+
+  warn(category, message) {
+    this.log(category, '⚠️ ' + message);
+  },
+
+  // Call BusAlertDebug.dumpLog() in the browser console to inspect the last 50 events.
+  dumpLog() { console.table(this._logs.slice(-50)); return this._logs; },
+  clear()    { this._logs = []; console.log('[BusAlertDebug] Log cleared.'); }
+};
+window.BusAlertDebug = BusAlertDebug; // expose for in-browser debugging
+
 // ─── BUS POLLER (backup for Firebase listener) ──────────────────
 let _busPoller = null;
 
@@ -802,30 +827,36 @@ let _studentGpsTimeout = null;
 function startBusPoller(busId) {
   stopBusPoller();
   if (!S.db) return;
-  
+
+  // ── INITIAL SNAPSHOT GUARD ───────────────────────────────────────────────────
+  // Firebase ALWAYS fires 'value' once immediately with the cached DB value.
+  // If that value is from a previous trip (even 20s old), it would flash the
+  // wrong location. We track whether this is the first event and apply a
+  // TIGHTER 10-second window only on that snapshot.
+  let _isFirstSnapshot = true;
+  const FIRST_SNAPSHOT_MAX_AGE_MS = 10000; // 10s — stricter than the 30s default
+
   const busRef = S.db.ref(`colleges/${S.collegeCode}/buses/${busId}/location`);
-  
+
   // Real-time listener for ultra-low latency location updates
   busRef.on('value', snap => {
     if (!S.trackOn || S.trackedId !== busId) { stopBusPoller(); return; }
 
     const loc = snap.val();
+    const isFirstSnap = _isFirstSnapshot;
+    _isFirstSnapshot = false;
 
-    // ── BUG FIX: Only treat a snap as "live" when it has real coordinates.
-    // Previously, setting hint/badge to green happened unconditionally, which
-    // overwrote the 🔴 OFFLINE state set by _handleBusUpdate every time the
-    // location node was null (driver ended trip / node deleted).
     if (loc && loc.lat && loc.lon) {
-
-      // ── BUG FIX #3: Timestamp staleness guard ───────────────────────
-      // If the received location timestamp is older than GPS_STALE_THRESHOLD_MS
-      // (30 seconds), it means the driver stopped sending updates (GPS lost,
-      // app killed, connectivity dropped). Do NOT update the map with stale
-      // data. Instead, show a clear offline state so students aren't misled.
       const locAge = loc.timestamp ? (Date.now() - loc.timestamp) : Infinity;
-      if (locAge > GPS_STALE_THRESHOLD_MS) {
-        console.warn(`[BusAlert Student] ⚠️ Received stale location (age: ${Math.round(locAge / 1000)}s) — NOT updating map marker. Showing offline state.`);
-        // Only apply offline badge if not already offline
+
+      // ── STALENESS GUARD ───────────────────────────────────────────────────
+      // First snapshot uses a tighter 10s window to prevent the old-trip
+      // location flash. Subsequent updates use the normal 30s threshold.
+      const maxAge = isFirstSnap ? FIRST_SNAPSHOT_MAX_AGE_MS : GPS_STALE_THRESHOLD_MS;
+
+      if (locAge > maxAge) {
+        BusAlertDebug.warn('STUDENT-READ',
+          `Stale location rejected (age:${Math.round(locAge/1000)}s > max:${maxAge/1000}s, firstSnap:${isFirstSnap}).`);
         if (S.trackedBusActive !== false) {
           const hint = q('#map-status-hint');
           if (hint) { hint.textContent = '⚠️ GPS Signal Lost — Driver may be offline'; hint.style.color = '#f59e0b'; }
@@ -833,37 +864,50 @@ function startBusPoller(busId) {
         return; // ← CRITICAL: do not render stale position
       }
 
-      // Debug log — confirms student is receiving fresh updates from Firebase
-      console.log(`[BusAlert Student] 📍 Live update received → lat:${loc.lat.toFixed(5)}, lon:${loc.lon.toFixed(5)}, age:${Math.round(locAge / 1000)}s`);
+      BusAlertDebug.log('STUDENT-READ',
+        `📍 Live update: lat:${loc.lat.toFixed(5)} lon:${loc.lon.toFixed(5)} age:${Math.round(locAge/1000)}s firstSnap:${isFirstSnap}`);
 
       // Valid, fresh location received — update map and restore live indicator
       if (S.allBuses[busId]) S.allBuses[busId].location = loc;
       moveBusOnMap(loc.lat, loc.lon);
       updateTrackInfo(loc);
 
-      // Only restore the online badge if we are NOT already showing offline
-      // (i.e. the parent /buses listener hasn't flagged the bus as inactive)
       if (S.trackedBusActive !== false) {
         _applyOnlineBadge('📡 Live Tracking');
       }
 
-      // Reset the stale-signal timer — if no update arrives in 30s,
-      // warn the student that GPS signal may be lost.
+      // Reset the stale-signal timer — if no update arrives in 30s, warn.
       if (_studentGpsTimeout) clearTimeout(_studentGpsTimeout);
       _studentGpsTimeout = setTimeout(() => {
-        // Only show stale warning if still online (not already marked offline)
         if (S.trackOn && S.trackedBusActive !== false) {
           const hint = q('#map-status-hint');
           if (hint) { hint.textContent = '⚠️ GPS Signal Lost — Showing Last Known Location'; hint.style.color = '#f59e0b'; }
-          console.warn('[BusAlert Student] ⏰ No location update for 30s — GPS signal may be lost.');
+          BusAlertDebug.warn('STUDENT-READ', 'No location update for 30s — GPS signal may be lost.');
         }
       }, GPS_STALE_THRESHOLD_MS);
     }
-    // If loc is null: driver deleted / cleared location. Do nothing here —
-    // _handleBusUpdate on the parent listener owns the offline badge transition.
+    // If loc is null: driver cleared location. _handleBusUpdate owns the offline badge.
   });
-  
-  // Store the ref so we can turn off the listener later
+
+  // ── lastPing listener: independently detect driver offline ────────────────
+  // Even if the location node still has data, if the driver's device stopped
+  // pinging activeDriver/lastPing for >60s, they are effectively offline.
+  const PING_STALE_MS = 60000; // 60 seconds without ping = offline
+  const pingRef = S.db.ref(`colleges/${S.collegeCode}/activeDriver/lastPing`);
+  pingRef.on('value', snap => {
+    if (!S.trackOn || S.trackedId !== busId) return;
+    const lastPing = snap.val();
+    if (!lastPing) return; // no ping yet (driver just started) — wait
+    const pingAge = Date.now() - lastPing;
+    if (pingAge > PING_STALE_MS && S.trackedBusActive !== false) {
+      BusAlertDebug.warn('STUDENT-READ', `Driver lastPing is ${Math.round(pingAge/1000)}s old — showing stale warning.`);
+      const hint = q('#map-status-hint');
+      if (hint) { hint.textContent = '🟡 Driver signal weak — GPS may have paused'; hint.style.color = '#f59e0b'; }
+    }
+  });
+  S._activePingRef = pingRef;
+
+  // Store the location ref so we can turn off the listener later
   S._activeBusRef = busRef;
 }
 
@@ -871,6 +915,10 @@ function stopBusPoller() {
   if (S._activeBusRef) {
     S._activeBusRef.off('value');
     S._activeBusRef = null;
+  }
+  if (S._activePingRef) {
+    S._activePingRef.off('value');
+    S._activePingRef = null;
   }
   if (_studentGpsTimeout) {
     clearTimeout(_studentGpsTimeout);
@@ -893,6 +941,16 @@ function refreshTracking() {
     if (data) {
       S.allBuses[S.trackedId] = data;
       if (data.location && data.location.lat && data.location.lon) {
+        // ── STALENESS GUARD: Never render stale coordinates on manual refresh.
+        // Firebase may still hold the last location from a previous trip.
+        const locAge = data.location.timestamp ? (Date.now() - data.location.timestamp) : Infinity;
+        if (locAge > GPS_STALE_THRESHOLD_MS) {
+          BusAlertDebug.warn('STUDENT-READ', `refreshTracking: stale location (age:${Math.round(locAge/1000)}s) discarded.`);
+          showToast('⚠️ Last known location is stale (>30s). Waiting for fresh GPS from driver...');
+          _applyOfflineBadge();
+          return;
+        }
+        BusAlertDebug.log('STUDENT-READ', `🔄 Manual refresh: fresh location (age:${Math.round(locAge/1000)}s) rendered.`);
         moveBusOnMap(data.location.lat, data.location.lon);
         updateTrackInfo(data.location);
         showToast('✅ Bus location updated!');
@@ -1582,7 +1640,8 @@ function startDriver(resuming = false) {
     ? crypto.randomUUID()
     : 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
   S.driverSessionId = sessionId;
-  S._isActiveDriver = false; // will be set to true by the listener below
+  S._isActiveDriver = false; // set to true after Firebase write confirms
+  let _sessionConfirmTimer = null;
 
   const activeDriverRef = S.db.ref(`colleges/${S.collegeCode}/activeDriver`);
 
@@ -1593,8 +1652,26 @@ function startDriver(resuming = false) {
     deviceUA: (navigator.userAgent || '').slice(0, 100),
     startedAt: Date.now()
   }).then(() => {
-    console.log('[BusAlert Security] ✅ activeDriver claim written — sessionId:', sessionId);
-  }).catch(e => console.error('[BusAlert Security] Failed to write activeDriver:', e.message));
+    // ── RACE-CONDITION FIX: Grant activeDriver status the moment our write
+    // succeeds — do NOT wait for the listener round-trip (200–800ms delay).
+    // Previously, every GPS fix during that window was silently dropped by
+    // onDriverPos() because S._isActiveDriver was still false.
+    S._isActiveDriver = true;
+    BusAlertDebug.log('SECURITY', '✅ activeDriver claimed & GPS push enabled. sessionId: ' + sessionId);
+    if (_sessionConfirmTimer) { clearTimeout(_sessionConfirmTimer); _sessionConfirmTimer = null; }
+  }).catch(e => {
+    BusAlertDebug.warn('SECURITY', 'Failed to write activeDriver: ' + e.message);
+    showToast('⚠️ Failed to claim driver session. Check connection and retry.');
+  });
+
+  // Safety abort: if _isActiveDriver never confirmed within 5s, stop the session.
+  _sessionConfirmTimer = setTimeout(() => {
+    if (!S._isActiveDriver && S.driverOn) {
+      BusAlertDebug.warn('SECURITY', 'activeDriver confirmation timed out after 5s — aborting session.');
+      showToast('❌ Could not claim driver session. Check your connection and retry.');
+      stopDriver();
+    }
+  }, 5000);
 
   // On disconnect: clear the activeDriver node so no stale lock remains
   activeDriverRef.onDisconnect().remove();
@@ -1610,15 +1687,15 @@ function startDriver(resuming = false) {
     const data = snap.val();
     if (!data || data.sessionId !== S.driverSessionId) {
       if (S.driverOn) {
-        // Our session was revoked — stop immediately
         S._isActiveDriver = false;
-        console.error('[BusAlert Security] 🚫 activeDriver session mismatch — another device has taken over. Stopping GPS.');
-        showToast('⚠️ Another device claimed this bus. Your location sharing has stopped.');
+        BusAlertDebug.warn('SECURITY', '🚫 activeDriver sessionId MISMATCH — another device has taken control. Stopping GPS immediately.');
+        showToast('⚠️ Another device claimed this bus. Location sharing stopped.');
         stopDriver();
       }
     } else {
-      // Confirmed: this device is the authorised GPS source
+      // Listener confirms we are still the authorised GPS source
       S._isActiveDriver = true;
+      BusAlertDebug.log('SECURITY', '🔒 activeDriver listener confirmed — this device is the live GPS source.');
     }
   });
 
@@ -1672,13 +1749,19 @@ function startDriver(resuming = false) {
 function startRobustDriverWatch() {
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
   if (SIMULATION.active) { stopAiSimulationLoop(); startAiSimulationLoop(); return; }
+  _resetGpsWatchdog(); // arm the 45s watchdog for this new watch session
 
   let retries = 0;
   function doWatch() {
     S.driverWid = watchPos(
-      onDriverPos,
+      pos => {
+        // Every successful GPS fix resets the watchdog so it doesn't fire
+        _resetGpsWatchdog();
+        BusAlertDebug.log('DRIVER-GPS', `📍 fix: lat=${pos.coords.latitude.toFixed(5)} lon=${pos.coords.longitude.toFixed(5)} acc=${Math.round(pos.coords.accuracy)}m`);
+        onDriverPos(pos);
+      },
       err => {
-        console.warn('Driver GPS error:', err);
+        BusAlertDebug.warn('DRIVER-GPS', `watchPosition error — code:${err.code} msg:${err.message}`);
         if (S.driverOn && retries < 5) {
           retries++;
           showToast(`⚠️ GPS weak, retrying (${retries}/5)...`);
@@ -1686,6 +1769,7 @@ function startRobustDriverWatch() {
           setTimeout(doWatch, 3000);
         } else if (retries >= 5) {
           showToast('❌ GPS failed after 5 retries. Check GPS settings.');
+          BusAlertDebug.warn('DRIVER-GPS', 'GPS permanently failed after 5 retries.');
         }
       }
     );
@@ -1693,6 +1777,29 @@ function startRobustDriverWatch() {
   doWatch();
   // Start heartbeat backup so GPS keeps firing even when app is backgrounded
   _startDriverHeartbeat();
+}
+
+// ── GPS WATCHDOG ──────────────────────────────────────────────────────────────
+// If no GPS fix arrives for GPS_WATCHDOG_MS, watchPosition has silently died
+// (Android battery optimisation, screen-off, app backgrounded). Auto-restart.
+const GPS_WATCHDOG_MS = 45000; // 45 seconds of GPS silence → full restart
+let _gpsWatchdogTimer = null;
+
+function _resetGpsWatchdog() {
+  if (_gpsWatchdogTimer) clearTimeout(_gpsWatchdogTimer);
+  if (!S.driverOn) return;
+  _gpsWatchdogTimer = setTimeout(() => {
+    if (!S.driverOn) return;
+    BusAlertDebug.warn('DRIVER-GPS', `🐕 GPS WATCHDOG fired — no fix for ${GPS_WATCHDOG_MS / 1000}s. Restarting watchPosition...`);
+    showToast('⚠️ GPS signal lost — auto-restarting...');
+    const accEl = q('#dlc-accuracy');
+    if (accEl) accEl.textContent = '⚠️ GPS TIMEOUT';
+    startRobustDriverWatch(); // full restart — clears old watch, resets watchdog
+  }, GPS_WATCHDOG_MS);
+}
+
+function _clearGpsWatchdog() {
+  if (_gpsWatchdogTimer) { clearTimeout(_gpsWatchdogTimer); _gpsWatchdogTimer = null; }
 }
 
 // ─── AI SCENARIO SIMULATION ENGINE ──────────────────────────────
@@ -1822,8 +1929,10 @@ function stopDriver() {
   BackgroundKeepAlive.stop();
   stopAiSimulationLoop();
   _stopDriverHeartbeat(); // stop background GPS heartbeat
+  _clearGpsWatchdog();    // stop the 45-second GPS watchdog
   releaseWakeLock();
   clearTimeout(S.geoWatchTimer);
+  BusAlertDebug.log('DRIVER-GPS', '⏹ Driver session stopped — GPS watch cleared.');
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
 
   // ── SECURITY: Stop listening to and release the activeDriver claim ──
@@ -1987,22 +2096,21 @@ function onDriverPos(pos) {
   };
 
   console.log(`[BusAlert Driver] 📡 Pushing location → lat:${lat.toFixed(5)}, lon:${lon.toFixed(5)}, acc:${Math.round(accuracy)}m, ts:${new Date(now).toLocaleTimeString()}`);
+  BusAlertDebug.log('DRIVER-GPS', `📤 PUSH lat:${lat.toFixed(5)} lon:${lon.toFixed(5)} acc:${Math.round(accuracy)}m`);
 
   if (navigator.onLine) {
     S.db.ref(`colleges/${S.collegeCode}/buses/${S.driverBusId}`).update(payload)
-      .then(() => console.log('[BusAlert Driver] ✅ Firebase write successful.'))
+      .then(() => BusAlertDebug.log('FIREBASE-WRITE', '✅ Firebase write OK'))
       .catch(e => {
-        console.warn('[BusAlert Driver] Firebase write failed — caching locally:', e.message);
-        // Cache only the LATEST point — older entries are irrelevant
+        BusAlertDebug.warn('FIREBASE-WRITE', 'Firebase write FAILED: ' + e.message + ' — caching locally.');
         _offlineGpsQueue = [payload];
         localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
       });
   } else {
-    // True offline caching — keep only the most recent fix
     _offlineGpsQueue = [payload];
     localStorage.setItem('ba_offline_gps', JSON.stringify(_offlineGpsQueue));
     showToast('⚠️ Offline - Caching GPS...');
-    console.warn(`[BusAlert Driver] 📴 Offline — GPS cached locally at ${new Date(now).toLocaleTimeString()}`);
+    BusAlertDebug.warn('FIREBASE-WRITE', `📴 Offline — GPS cached at ${new Date(now).toLocaleTimeString()}`);
   }
 }
 
@@ -2180,16 +2288,29 @@ let _driverHeartbeat = null;
 function _startDriverHeartbeat() {
   _stopDriverHeartbeat();
   _driverHeartbeat = setInterval(() => {
-    // FIX: Double-guard with S.driverBusId to prevent a stale setInterval
-    // callback from pushing GPS coordinates after the driver session has
-    // ended. Without this, a race between clearInterval() and the next
-    // callback execution could push the developer device's location to Firebase.
     if (!S.driverOn || !S.driverBusId || SIMULATION.active) return;
+
+    // ── Heartbeat GPS: backup fix if watchPosition went dormant ──
     navigator.geolocation.getCurrentPosition(
-      pos => onDriverPos(pos),
-      () => {}, // silent fail — watchPosition is the primary source
+      pos => {
+        BusAlertDebug.log('DRIVER-GPS', `💗 Heartbeat GPS fix — acc:${Math.round(pos.coords.accuracy)}m`);
+        _resetGpsWatchdog(); // heartbeat counts as a live fix
+        onDriverPos(pos);
+      },
+      () => {
+        BusAlertDebug.warn('DRIVER-GPS', 'Heartbeat GPS failed (silent — watchPosition is primary)');
+      },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
+
+    // ── Heartbeat lastPing: write timestamp to activeDriver so students can
+    // detect driver offline even when location node still exists in Firebase.
+    if (S.db && S._isActiveDriver && S.collegeCode) {
+      const now = Date.now();
+      S.db.ref(`colleges/${S.collegeCode}/activeDriver/lastPing`).set(now)
+        .then(() => BusAlertDebug.log('FIREBASE-WRITE', `💗 lastPing written: ${new Date(now).toLocaleTimeString()}`))
+        .catch(e => BusAlertDebug.warn('FIREBASE-WRITE', 'lastPing write failed: ' + e.message));
+    }
   }, 25000); // every 25 seconds
 }
 

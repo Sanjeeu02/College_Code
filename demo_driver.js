@@ -1,3 +1,39 @@
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  ⚠️  DEMO DRIVER — DISABLED FOR PRODUCTION SAFETY              ║
+// ║                                                                  ║
+// ║  This script was the #1 root cause of the "wrong location" bug.  ║
+// ║  It made UNAUTHENTICATED REST PUT requests directly to Firebase  ║
+// ║  every 1 second, bypassing the activeDriver session lock and     ║
+// ║  overwriting the real driver's GPS coordinates.                  ║
+// ║                                                                  ║
+// ║  DO NOT run this script while the app is in production use.      ║
+// ║  If you need a test driver, use the AI Simulation mode in the    ║
+// ║  driver tab of the app — it respects the session lock.          ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+console.error(
+  '\n' +
+  '════════════════════════════════════════════════════════\n' +
+  '🚫  DEMO DRIVER DISABLED — PRODUCTION SAFETY GUARD\n' +
+  '════════════════════════════════════════════════════════\n' +
+  '\n' +
+  'This script overwrites real driver GPS data in Firebase.\n' +
+  'It has been DISABLED to prevent the wrong-location bug.\n' +
+  '\n' +
+  'To test with a fake driver:\n' +
+  '  → Open the app in a browser\n' +
+  '  → Log in as a driver\n' +
+  '  → Enable "AI Simulation" in the driver tab\n' +
+  '\n' +
+  'This script will NOT start.\n' +
+  '════════════════════════════════════════════════════════\n'
+);
+
+// Exit immediately — do NOT run any Firebase writes.
+process.exit(1);
+
+// ── ORIGINAL CODE PRESERVED BELOW FOR REFERENCE (NEVER RUNS) ────────
+/*
 const https = require('https');
 
 const intervalId = setInterval(() => {
@@ -38,3 +74,4 @@ const intervalId = setInterval(() => {
 }, 1000 * 1); // every 1 second
 
 console.log('Demo Driver started sharing location! Leave this running...');
+*/
