@@ -1738,8 +1738,11 @@ function startDriver(resuming = false) {
     createdBy: createdBy || 'admin'
   });
 
-  // Reset GPS write throttle for the new session
+  // Reset GPS write throttle and quality-filter state for the new session
   _lastPushTime = 0;
+  _lastFixTime = 0;
+  _smoothLat = null;
+  _smoothLon = null;
 
   requestWakeLock();
   startRobustDriverWatch();
@@ -1750,6 +1753,10 @@ function startRobustDriverWatch() {
   if (S.driverWid !== null) { navigator.geolocation.clearWatch(S.driverWid); S.driverWid = null; }
   if (SIMULATION.active) { stopAiSimulationLoop(); startAiSimulationLoop(); return; }
   _resetGpsWatchdog(); // arm the 45s watchdog for this new watch session
+
+  // Reset warm-up skip counter: the first GPS_WARMUP_FIXES fixes after any
+  // (re)start are typically TTFF estimates with poor accuracy — skip them.
+  _gpsWarmupCount = 0;
 
   let retries = 0;
   function doWatch() {
@@ -1989,6 +1996,16 @@ let _lastMoved, _lastLat, _lastLon;
 let _lastPushTime = 0;                    // GPS write throttle timestamp
 const GPS_PUSH_INTERVAL_MS = 5000;        // push to Firebase at most every 5 seconds
 
+// ── GPS QUALITY FILTER STATE ──────────────────────────────────────
+// _lastFixTime   : timestamp of the last accepted fix, used for speed-plausibility guard.
+// _smoothLat/Lon : exponential moving average (EMA) of accepted coordinates.
+//                  Reduces single-point AGPS noise spikes on the student map.
+// _gpsWarmupCount: counts the cold-start fixes that are skipped (TTFF fixes are
+//                  low-quality and must not be pushed as the "first" position).
+let _lastFixTime = 0;
+let _smoothLat = null, _smoothLon = null;
+let _gpsWarmupCount = 0;
+
 // ── SECURITY FIX: Always start with a completely clean offline GPS queue.
 // Loading stale GPS fixes from a previous session via localStorage caused
 // those coordinates to be re-pushed to Firebase on reconnect, snapping
@@ -2038,6 +2055,11 @@ window.addEventListener('online', () => {
 // 100m is generous — real live-tracking needs at least this quality.
 const GPS_ACCURACY_THRESHOLD = 100;
 
+// GPS quality-filter constants
+const GPS_WARMUP_FIXES   = 2;    // number of cold-start fixes to skip (TTFF quality)
+const MAX_BUS_SPEED_KMH  = 130;  // physical upper bound; anything faster is an outlier
+const GPS_EMA_ALPHA      = 0.35; // EMA smoothing factor (higher = more responsive)
+
 function onDriverPos(pos) {
   if (!S.driverOn) return;
 
@@ -2056,18 +2078,56 @@ function onDriverPos(pos) {
   }
 
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
-  
-  // Validate coordinates (null / 0,0 island guard)
+
+  // ── FIX 1: Validate coordinates (null / 0,0 island guard) ────
   if (!lat || !lon || (lat === 0 && lon === 0)) return;
 
-  // Accuracy filter — skip low-quality first GPS fixes
+  // ── FIX 2: Accuracy filter — reject low-quality fixes ────────
   if (accuracy > GPS_ACCURACY_THRESHOLD) {
     console.warn(`⚠️ GPS fix rejected (accuracy ${Math.round(accuracy)}m > ${GPS_ACCURACY_THRESHOLD}m threshold). Waiting for better signal.`);
     q('#dlc-accuracy').textContent = Math.round(accuracy) + 'm ⚠️';
     return;
   }
-  
+
+  // ── FIX 3: Stale OS-cache guard ──────────────────────────────
+  // pos.timestamp is the time the fix was actually acquired by the radio.
+  // Even with maximumAge:0 some OS/browser combos return cached fixes.
+  // Reject anything older than GPS_STALE_THRESHOLD_MS.
+  const fixAge = Date.now() - pos.timestamp;
+  if (fixAge > GPS_STALE_THRESHOLD_MS) {
+    console.warn(`⚠️ GPS fix rejected — fix is ${Math.round(fixAge / 1000)}s old (stale OS cache). Waiting for fresh radio fix.`);
+    BusAlertDebug.warn('DRIVER-GPS', `🕐 Stale fix discarded (age: ${Math.round(fixAge / 1000)}s)`);
+    return;
+  }
+
+  // ── FIX 4: Cold-start warm-up skip ───────────────────────────
+  // The first GPS_WARMUP_FIXES fixes after watchPosition (re)starts are
+  // typically Time-To-First-Fix (TTFF) estimates with degraded accuracy.
+  // Skip them to prevent a cold-start coordinate jump on the student map.
+  if (_gpsWarmupCount < GPS_WARMUP_FIXES) {
+    _gpsWarmupCount++;
+    BusAlertDebug.log('DRIVER-GPS', `🔥 Warm-up: skipping fix ${_gpsWarmupCount}/${GPS_WARMUP_FIXES} (acc: ${Math.round(accuracy)}m)`);
+    console.log(`[GPS Warm-up] Skipping fix ${_gpsWarmupCount}/${GPS_WARMUP_FIXES} — acc:${Math.round(accuracy)}m`);
+    return;
+  }
+
   const now = Date.now();
+
+  // ── FIX 5: Speed-plausibility / teleport outlier filter ──────
+  // A bus cannot physically travel faster than MAX_BUS_SPEED_KMH.
+  // If the implied speed between the last accepted fix and this one
+  // exceeds that threshold, this fix is a GPS outlier — discard it.
+  if (_lastLat && _lastLon && _lastFixTime) {
+    const distKm      = getDistance(lat, lon, _lastLat, _lastLon);
+    const elapsedHrs  = (now - _lastFixTime) / 3600000;
+    const impliedKmh  = elapsedHrs > 0 ? distKm / elapsedHrs : 0;
+    if (impliedKmh > MAX_BUS_SPEED_KMH) {
+      console.warn(`⚠️ GPS outlier rejected — implied speed ${Math.round(impliedKmh)} km/h > ${MAX_BUS_SPEED_KMH} km/h limit.`);
+      BusAlertDebug.warn('DRIVER-GPS', `🚫 Outlier: ${Math.round(impliedKmh)} km/h (dist:${(distKm * 1000).toFixed(0)}m in ${Math.round(now - _lastFixTime)}ms)`);
+      return;
+    }
+  }
+  _lastFixTime = now;
 
   // Auto-Stop check (Parked for > 20 mins)
   const moved = getDistance(lat, lon, _lastLat || lat, _lastLon || lon) > 0.05;
@@ -2087,10 +2147,19 @@ function onDriverPos(pos) {
   if (now - _lastPushTime < GPS_PUSH_INTERVAL_MS) return;
   _lastPushTime = now;
   
+  // ── FIX 6: EMA coordinate smoothing ─────────────────────────
+  // Apply an exponential moving average to dampen single-point AGPS noise
+  // spikes without introducing multi-second lag. Alpha=0.35 is a balance
+  // between responsiveness (high α) and stability (low α).
+  _smoothLat = (_smoothLat !== null) ? GPS_EMA_ALPHA * lat + (1 - GPS_EMA_ALPHA) * _smoothLat : lat;
+  _smoothLon = (_smoothLon !== null) ? GPS_EMA_ALPHA * lon + (1 - GPS_EMA_ALPHA) * _smoothLon : lon;
+
   const payload = {
     active: true,
-    'location/lat': lat,
-    'location/lon': lon,
+    'location/lat': _smoothLat,        // EMA-smoothed (shown on student map)
+    'location/lon': _smoothLon,        // EMA-smoothed (shown on student map)
+    'location/rawLat': lat,            // raw radio fix (retained for debugging)
+    'location/rawLon': lon,            // raw radio fix (retained for debugging)
     'location/accuracy': accuracy,
     'location/timestamp': now
   };
@@ -2234,7 +2303,10 @@ function getPos(ok, fail) {
     e => {
       if (e.code === 3) { // Timeout
         console.warn('GPS High Accuracy Timeout. Retrying with standard accuracy...');
-        navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+        // FIX: maximumAge reduced from 60000→10000. A 60s window allowed the
+        // browser to return a cached developer-testing fix from a prior session,
+        // causing the bus marker to jump to an old/wrong location.
+        navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: false, timeout: 10000, maximumAge: 10000 });
       } else {
         fail(e.message || 'GPS error');
       }
@@ -2248,10 +2320,18 @@ function getPos(ok, fail) {
 
 function watchPos(ok, fail) {
   if (!navigator.geolocation) return null;
-  // Use strictly zero maximumAge and enforce high accuracy for live tracking
+  // maximumAge:0 — forces the OS to request a fresh radio fix on every callback.
+  //   Never allow the browser to return a cached position (which could be a
+  //   developer-testing location from a prior session).
+  // enableHighAccuracy:true — requests GPS chipset + AGPS (satellites + WiFi + cell).
+  //   The browser/OS fuses all available signals for best accuracy.
+  // timeout:10000 — if no fresh fix arrives in 10s, fire the error callback
+  //   so the watchdog/retry logic can handle it rather than silently blocking.
   return navigator.geolocation.watchPosition(
     ok,
     e => {
+      // Code 3 = TIMEOUT — non-fatal; watchPosition will keep trying.
+      // Codes 1/2 (PERMISSION_DENIED / POSITION_UNAVAILABLE) are fatal → propagate.
       if (e.code !== 3) {
         console.warn('watchPos update error:', e.message);
         fail(e.message || 'GPS error');
@@ -2311,7 +2391,12 @@ function _startDriverHeartbeat() {
         .then(() => BusAlertDebug.log('FIREBASE-WRITE', `💗 lastPing written: ${new Date(now).toLocaleTimeString()}`))
         .catch(e => BusAlertDebug.warn('FIREBASE-WRITE', 'lastPing write failed: ' + e.message));
     }
-  }, 25000); // every 25 seconds
+  // FIX: Interval increased from 25s → 40s.
+  // watchPosition is the primary GPS source. The heartbeat is a dormancy
+  // fallback for backgrounded tabs only. A 25s concurrent getCurrentPosition
+  // call on top of watchPosition can cause GPS radio contention on older
+  // Android chipsets, producing brief signal blackouts.
+  }, 40000); // every 40 seconds (watchPosition is primary)
 }
 
 function _stopDriverHeartbeat() {
